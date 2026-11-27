@@ -240,7 +240,8 @@ class TermDialog(QDialog):
         form.addRow("Término (texto literal):", self.text)
         self.rule = QComboBox()
         for r in rules:
-            self.rule.addItem(f"{r.id} → {r.replacement or '(eliminar)'}  [{r.category.value}]", r.id)
+            where = "  · lista negra (CSV)" if r.word_only else ""
+            self.rule.addItem(f"{r.id} → {r.replacement or '(eliminar)'}  [{r.category.value}]{where}", r.id)
         self.rule.addItem("➕ Nueva regla…", "")
         if rule_id:
             self.rule.setCurrentIndex(max(0, self.rule.findData(rule_id)))

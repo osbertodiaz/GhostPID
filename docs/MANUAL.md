@@ -165,6 +165,15 @@ Según el tipo:
 Los términos se buscan como palabras completas, sin distinguir mayúsculas,
 y admiten espacios o saltos de línea entre palabras.
 
+**La lista negra de la industria.** Las reglas `kb-epc`, `kb-licensor`,
+`kb-manufacturer` y `kb-operator` (marcadas *lista negra (CSV)* en el
+desplegable) vienen de `configs/blacklist/industria.csv`, una base de datos con
+más de mil ingenierías, licenciantes, fabricantes y operadores. Si eliges una
+de ellas al añadir un término, el nombre se guarda como fila nueva en
+`configs/blacklist/propia.csv` y servirá para todos los clientes. Descartar
+una detección de la lista negra la convierte en excepción solo para este
+cliente. El CSV se puede abrir y ampliar en Excel (ver la sección 5).
+
 ### 3.5 Dibujar zonas
 
 Sirven para lo que no es texto, como un logo vectorial o un sello, o para
@@ -294,6 +303,16 @@ Puntos clave:
   `disable: [id]`.
 - **Comprobar una config** desde la línea de comandos:
   `uv run validate-config configs/<cliente>.yaml --check "texto de prueba"`.
+- **Lista negra de la industria:** `configs/blacklist/*.csv`, una fila por
+  empresa con las columnas `name` (nombre principal), `aliases` (otras formas
+  separadas por `|`), `category` (`epc`, `licensor`, `manufacturer`,
+  `operator`, o en español `ingenieria`, `licenciante`, `fabricante`,
+  `operador`), `segment`, `industries` (`oil_gas`, `chemicals`, `gases`,
+  `pharma`, `power`, `general`), `country`, `active` (`no` la desactiva) y
+  `notes`. Al guardar, la herramienta rechaza nombres de menos de 3
+  caracteres, palabras de P&ID ("Shell", "Total", "Crane") y nombres
+  repetidos, indicando el fichero y la línea. Para un cliente concreto:
+  `blacklist: {industries: [pharma], exclude: [Vega]}` en su YAML.
 
 ---
 

@@ -131,6 +131,24 @@ class Blacklist:
     generics: set[str]
     # Excepciones de cada regla: coincidencias descartadas al revisar
     excepted: dict[str, Any] = field(default_factory=dict)
+    # Literales de la lista negra de la industria: solo palabras completas
+    # ("LINDE" no es un resto dentro de "CYLINDER")
+    words: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self._word_rx = self._word_ocr_rx = None
+        if self.words:
+            alts = sorted({r"\s*".join(re.escape(w) for w in lit.split()) for lit in self.words}, key=len, reverse=True)
+            self._word_rx = re.compile(rf"(?<!\w)(?:{'|'.join(alts)})(?!\w)", re.IGNORECASE)
+            alts = sorted({r"\s*".join(re.escape(w) for w in ocr_normalize(lit).split()) for lit in self.words}, key=len, reverse=True)
+            self._word_ocr_rx = re.compile(rf"(?<!\w)(?:{'|'.join(alts)})(?!\w)")
+
+    def _word_hits(self, text: str, ocr: bool = False) -> list[tuple[int, int, str]]:
+        rx = self._word_ocr_rx if ocr else self._word_rx
+        if rx is None:
+            return []
+        haystack = ocr_normalize(text) if ocr else text
+        return [(m.start(), m.end(), text[m.start() : m.end()]) for m in rx.finditer(haystack)]
 
     def _pattern_hits(self, text: str) -> list[tuple[int, int, str]]:
         hits = []
@@ -151,7 +169,7 @@ class Blacklist:
             words = lit.split()
             rx = re.compile(r"\s*".join(re.escape(w) for w in words) if len(words) > 1 else re.escape(lit), re.IGNORECASE)
             hits += [(m.start(), m.end(), lit) for m in rx.finditer(text)]
-        return hits + self._pattern_hits(text)
+        return hits + self._word_hits(text) + self._pattern_hits(text)
 
     def ocr_hits(self, text: str) -> list[tuple[int, int, str]]:
         """Como text_hits, tolerando confusiones de OCR en los literales."""
@@ -163,28 +181,35 @@ class Blacklist:
             words = ocr_normalize(lit).split()
             rx = re.compile(r"\s*".join(re.escape(w) for w in words))
             hits += [(m.start(), m.end(), lit) for m in rx.finditer(norm)]
-        return hits + self._pattern_hits(text)
+        return hits + self._word_hits(text, ocr=True) + self._pattern_hits(text)
 
 
 def build_blacklist(config: Any, map_data: dict[str, Any] | None) -> Blacklist:
     literals: set[str] = set()
+    words: set[str] = set()
     generics: set[str] = set()
+    word_rules = {rule.id for rule in config.substitutions if rule.word_only}
     for rule in config.substitutions:
-        literals.update(" ".join(t.split()) for t in rule.terms)
+        (words if rule.word_only else literals).update(" ".join(t.split()) for t in rule.terms)
         if rule.replacement:
             generics.add(rule.replacement.split("{")[0].strip("-_ ").casefold())
     if map_data:
         for value, entry in map_data["entries"].items():
-            literals.update(" ".join(o.split()) for o in entry["originals"])
+            kb = entry.get("rule") in word_rules or str(entry.get("rule") or "").startswith("kb-")
+            (words if kb else literals).update(" ".join(o.split()) for o in entry["originals"])
             if value:
                 generics.add(value.casefold())
-    # Un original que coincide con una denominación genérica no es un resto
-    literals = {lit for lit in literals if lit and lit.casefold() not in generics}
-    # Un original del mapa que luego se declaró excepción tampoco
-    literals = {lit for lit in literals if not any(rule.excepted(lit) for rule in config.substitutions)}
+
+    def keep(lit: str) -> bool:
+        # Un original que coincide con una denominación genérica no es un resto,
+        # ni uno del mapa que luego se declaró excepción
+        return bool(lit) and lit.casefold() not in generics and not any(rule.excepted(lit) for rule in config.substitutions if rule.exceptions)
+
+    literals = {lit for lit in literals if keep(lit)}
+    words = {w for w in words if keep(w)} - literals
     patterns = [(rule.id, rx) for rule in config.substitutions for rx in rule.pattern_regexes]
     excepted = {rule.id: rule for rule in config.substitutions if rule.exceptions}
-    return Blacklist(sorted(literals, key=lambda s: (-len(s), s)), patterns, generics, excepted)
+    return Blacklist(sorted(literals, key=lambda s: (-len(s), s)), patterns, generics, excepted, sorted(words))
 
 
 def _protected_spans(config: Any, text: str) -> list[tuple[int, int]]:
@@ -229,10 +254,14 @@ def _check_text(path: Path, config: Any, blacklist: Blacklist, result: AuditResu
         result.checks["texto"] = {"páginas": doc.page_count}
 
 
+def _decoded(raw: bytes) -> str:
+    return raw.decode("utf-16-be" if b"\x00" in raw else "utf-8", errors="replace")
+
+
 def _check_objects(path: Path, blacklist: Blacklist, result: AuditResult) -> None:
     """Literales en cualquier objeto del PDF (streams descomprimidos, sin imágenes)."""
     literals = [lit for lit in blacklist.literals if len(lit) >= MIN_LITERAL]
-    rxs = []
+    rxs: list[tuple[str | None, re.Pattern[bytes]]] = []
     for lit in literals:
         for encoding in ("utf-8", "utf-16-be"):
             try:
@@ -240,6 +269,18 @@ def _check_objects(path: Path, blacklist: Blacklist, result: AuditResult) -> Non
             except UnicodeEncodeError:
                 continue
             rxs.append((lit, re.compile(re.escape(raw), re.IGNORECASE)))
+    # Lista negra de la industria: una regex por codificación, palabra completa
+    words = [w for w in blacklist.words if len(w) >= MIN_LITERAL]
+    if words:
+        for encoding, edge in (("utf-8", rb"[A-Za-z0-9]"), ("utf-16-be", rb"\x00[A-Za-z0-9]")):
+            alts = []
+            for w in sorted(words, key=len, reverse=True):
+                try:
+                    alts.append(re.escape(w.encode(encoding)))
+                except UnicodeEncodeError:
+                    continue
+            body = b"|".join(alts)
+            rxs.append((None, re.compile(rb"(?<!" + edge + rb")(?:" + body + rb")(?!" + edge + rb")", re.IGNORECASE)))
     scanned = 0
     with pikepdf.open(path) as pdf:
         for obj in pdf.objects:
@@ -260,13 +301,15 @@ def _check_objects(path: Path, blacklist: Blacklist, result: AuditResult) -> Non
                 continue
             scanned += 1
             for lit, rx in rxs:
-                if rx.search(data):
-                    result.findings.append(Finding("error", "objeto", lit, None, f"objeto {obj.objgen}"))
+                m = rx.search(data)
+                if m:
+                    result.findings.append(Finding("error", "objeto", lit or _decoded(m.group()), None, f"objeto {obj.objgen}"))
         try:
             trailer = pdf.trailer.unparse(resolved=True)
             for lit, rx in rxs:
-                if rx.search(trailer):
-                    result.findings.append(Finding("error", "objeto", lit, None, "trailer"))
+                m = rx.search(trailer)
+                if m:
+                    result.findings.append(Finding("error", "objeto", lit or _decoded(m.group()), None, "trailer"))
         except Exception:
             pass
     result.checks["objetos"] = {"revisados": scanned}
@@ -557,7 +600,11 @@ def audit(
 
     result = AuditResult(path.name)
     blacklist = build_blacklist(config, map_data)
-    result.checks["lista negra"] = {"literales": len(blacklist.literals), "patrones": len(blacklist.patterns)}
+    result.checks["lista negra"] = {
+        "literales": len(blacklist.literals),
+        "patrones": len(blacklist.patterns),
+        "industria": len(blacklist.words),
+    }
 
     _check_text(path, config, blacklist, result)
     _check_objects(path, blacklist, result)

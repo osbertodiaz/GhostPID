@@ -8,6 +8,10 @@ Con `extends`, una regla repetida en el hijo sobrescribe solo las claves que
 indica, y las listas se sustituyen enteras. Por eso, al ampliar una lista de
 una regla heredada, se escribe la lista completa (la heredada más lo nuevo).
 
+Los términos de las reglas de la lista negra (`kb-…`) no van al YAML: se
+añaden como fila nueva al CSV del usuario (`blacklist.user_file`). Sus
+excepciones sí van al YAML, en una entrada con el mismo id.
+
 Tras escribir se vuelve a cargar y validar la config. Si queda inválida o con
 errores de solape, se restaura la copia y se lanza `EditError`: la config
 nunca queda rota.
@@ -23,6 +27,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from sanitizer.blacklist import RULE_PREFIX, BlacklistError, Entity, append_entity, load_entities
 from sanitizer.rules import Config, ConfigError, check_overlaps, load_config
 
 
@@ -112,7 +117,30 @@ class ConfigEditor:
     def add_term(self, rule_id: str, term: str) -> Config:
         """Añade un término literal a una sustitución existente."""
         rule = self._substitution(rule_id)
+        if rule.word_only and rule_id.startswith(RULE_PREFIX):
+            return self.add_to_blacklist(rule_id.removeprefix(RULE_PREFIX), term)
         return self._extend_list("substitutions", rule_id, "terms", list(rule.terms), term)
+
+    def add_to_blacklist(self, category: str, name: str, aliases: tuple[str, ...] = ()) -> Config:
+        """Añade una entidad al CSV del usuario de la lista negra."""
+        policy = self.config.blacklist
+        if not policy.user_file:
+            raise EditError("la config no define blacklist.user_file (CSV donde añadir)")
+        target = Path(policy.user_file)
+        name = " ".join(name.split())
+        before = target.read_bytes() if target.exists() else None
+        try:
+            known = load_entities(policy.paths())
+            append_entity(target, Entity(name, aliases, category, notes="añadido desde la revisión"), known)
+            config = load_config(self.path)
+        except (BlacklistError, ConfigError) as exc:
+            if before is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_bytes(before)
+            raise EditError("; ".join(exc.messages)) from None
+        self.config = config
+        return config
 
     def add_exception(self, rule_id: str, text: str) -> Config:
         """Declara `text` excepción de una sustitución (falso positivo)."""

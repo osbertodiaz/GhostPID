@@ -208,6 +208,8 @@ class Namer:
             template = entry["template"]
             for original in entry["originals"]:
                 namer._values[(template, normalize(original))] = value
+            if entry.get("entity"):
+                namer._values[(template, ENTITY_KEY + normalize(entry["entity"]))] = value
             if entry.get("n"):
                 namer._counters[template] = max(namer._counters.get(template, 0), entry["n"])
             namer.entries[value] = {
@@ -222,16 +224,22 @@ class Namer:
 
     def name(self, template: str, original: str, rule: Any = None, exact: bool = True) -> str:
         """Denominación para `original`. `exact`: leído del texto real (no OCR)."""
-        key = (template, normalize(original))
+        keys = [(template, normalize(original))]
+        # Lista negra: todos los alias de una entidad comparten denominación
+        entity = rule.entity_of(original) if rule is not None and getattr(rule, "entities", None) else None
+        if entity:
+            keys.append((template, ENTITY_KEY + normalize(entity)))
+        value = next((self._values[k] for k in keys if k in self._values), None)
         n = None
-        if key not in self._values:
+        if value is None:
             if "{n}" in template:
                 n = self._counters.get(template, 0) + 1
                 self._counters[template] = n
-                self._values[key] = template.format(n=n)
+                value = template.format(n=n)
             else:
-                self._values[key] = template
-        value = self._values[key]
+                value = template
+        for k in keys:
+            self._values.setdefault(k, value)
         originals = self.mapping.setdefault(value, [])
         if original not in originals:
             originals.append(original)
@@ -242,11 +250,17 @@ class Namer:
         if rule is not None and entry["rule"] is None:
             entry["rule"] = rule.id
             entry["category"] = rule.category.value
+        if entity:
+            entry.setdefault("entity", entity)
         # Los saltos de línea y espacios del plano no distinguen originales
         stats = entry["originals"].setdefault(" ".join(original.split()), {"count": 0, "exact": 0})
         stats["count"] += 1
         stats["exact"] += int(exact)
         return value
+
+
+# Prefijo de las claves de entidad del Namer (no colisiona con un original)
+ENTITY_KEY = "\x00entity:"
 
 
 def normalize(text: str) -> str:
@@ -288,16 +302,12 @@ def find_matches(
     protected = [(m.start(), m.end(), wl.id) for wl in config.whitelist for m in wl.regex.finditer(text)]
     protected += list(extra_protected)
 
-    from sanitizer.rules import term_regex  # rules importa este módulo
-
     normalized = ocr_normalize(text) if fuzzy else None
     candidates = []
     for order, rule in enumerate(config.substitutions):
         if fuzzy:
-            searches = [
-                (re.compile(term_regex(ocr_normalize(t), word_boundaries=not relaxed)), normalized)
-                for t in rule.terms
-            ] + [(rx, text) for rx in rule.pattern_regexes]
+            searches = [(rx, normalized) for rx in rule.ocr_term_matchers(relaxed)]
+            searches += [(rx, text) for rx in rule.pattern_regexes]
         else:
             searches = [(rx, text) for rx in (rule.relaxed_matchers if relaxed else rule.matchers)]
         for rx, haystack in searches:
@@ -330,6 +340,8 @@ def near_misses(config: Any, text: str, accepted: list[Match]) -> list[tuple[str
 
     out = []
     for rule in config.substitutions:
+        if rule.word_only:
+            continue  # lista negra: solo palabras completas, nada de rozadas
         flags = 0 if rule.case_sensitive else re.IGNORECASE
         raw = [term_regex(t, word_boundaries=False) for t in rule.terms]
         # Términos de varias palabras que aparecen solo en parte (p. ej. un logo

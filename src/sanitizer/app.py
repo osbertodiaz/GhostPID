@@ -44,7 +44,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "PID Anonymouse"
-SHARED_CONFIGS = ("base.yaml", "example.yaml")
+SHARED_CONFIGS = ("base.yaml", "example.yaml", "blacklist/industria.csv")
 
 
 # --------------------------------------------------------------------------
@@ -81,6 +81,7 @@ def _ensure_workspace(root: Path) -> None:
     for name in SHARED_CONFIGS:
         bundled = _bundle_dir() / "configs" / name
         if not (configs / name).exists() and bundled.exists():
+            (configs / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(bundled, configs / name)
 
 

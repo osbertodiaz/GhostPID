@@ -17,6 +17,8 @@ Una config tiene cuatro bloques:
 - `logos`: imágenes repetidas que se eliminan, y hashes fijados a mano.
 - `ocr`: OCR del texto en trazos y de los escaneados.
 - `audit`: comprobaciones finales (OCR de la auditoría, franjas de revisión).
+- `blacklist`: lista negra de la industria (CSV de empresas, ver
+  `sanitizer.blacklist`); se convierte en sustituciones `kb-<categoría>`.
 
 Las configs pueden heredar de otra con `extends` (ruta relativa al fichero).
 Al heredar:
@@ -43,7 +45,7 @@ import string
 import sys
 from dataclasses import dataclass
 from enum import Enum
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -51,11 +53,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from sanitizer.audit import AuditPolicy
+from sanitizer.blacklist import RULE_PREFIX as KB_PREFIX
+from sanitizer.blacklist import BlacklistError, BlacklistPolicy, build_rules, entity_key, is_acronym, resolve_paths
 from sanitizer.inventory import DetectionParams
 from sanitizer.metadata import MetadataPolicy
 from sanitizer.logos import LogoPolicy
 from sanitizer.ocr import OcrPolicy
-from sanitizer.redact import RedactionPolicy
+from sanitizer.redact import RedactionPolicy, ocr_normalize
 
 SCHEMA_VERSION = 1
 
@@ -207,6 +211,13 @@ class SubstitutionRule(_Strict):
     # positivos descartados al revisar). Comparación del texto entero, con
     # espacios flexibles y sin distinguir mayúsculas salvo `case_sensitive`.
     exceptions: list[str] = Field(default_factory=list)
+    # Reglas de la lista negra (CSV): término (clave `entity_key`) → entidad,
+    # para que los alias de una empresa compartan denominación (VENDOR-3)
+    entities: dict[str, str] = Field(default_factory=dict)
+    # Términos solo como palabras completas, también en OCR y en la auditoría
+    # ("LINDE" no debe encajar dentro de "CYLINDER"). Se buscan con una sola
+    # regex combinada: la lista negra tiene miles de términos.
+    word_only: bool = False
 
     @field_validator("terms", "exceptions")
     @classmethod
@@ -265,18 +276,49 @@ class SubstitutionRule(_Strict):
     def pattern_regexes(self) -> list[re.Pattern[str]]:
         return [_compile(_wrap(p, self.boundary), self._flags) for p in self.patterns]
 
+    def entity_of(self, text: str) -> str | None:
+        """Entidad de la lista negra a la que pertenece `text`, si la hay."""
+        return self.entities.get(entity_key(text)) if self.entities else None
+
+    @cached_property
+    def _combined(self) -> re.Pattern[str]:
+        """Una regex con todos los términos (más largos primero), palabra
+        completa. Las siglas en mayúsculas distinguen mayúsculas."""
+        parts = []
+        for t in sorted(self.terms, key=len, reverse=True):
+            body = r"\s+".join(re.escape(w) for w in t.split())
+            parts.append(f"(?-i:{body})" if is_acronym(t) and not self.case_sensitive else body)
+        return re.compile(rf"(?<!\w)(?:{'|'.join(parts)})(?!\w)", self._flags)
+
+    @cached_property
+    def _combined_ocr(self) -> re.Pattern[str]:
+        """Como `_combined`, sobre texto pasado por `ocr_normalize`."""
+        words = {r"\s+".join(re.escape(w) for w in ocr_normalize(t).split()) for t in self.terms}
+        alts = sorted(words, key=len, reverse=True)
+        return re.compile(rf"(?<!\w)(?:{'|'.join(alts)})(?!\w)")
+
     @property
     def matchers(self) -> list[re.Pattern[str]]:
         """Regex de términos y patrones, en ese orden."""
+        if self.word_only:
+            return ([self._combined] if self.terms else []) + self.pattern_regexes
         terms = [_compile(term_regex(t), self._flags) for t in self.terms]
         return terms + self.pattern_regexes
 
     @property
     def relaxed_matchers(self) -> list[re.Pattern[str]]:
         """Como `matchers`, pero los términos encajan también dentro de otras
-        palabras (capas OCR con palabras pegadas)."""
+        palabras (capas OCR con palabras pegadas). No en reglas `word_only`."""
+        if self.word_only:
+            return self.matchers
         terms = [_compile(term_regex(t, word_boundaries=False), self._flags) for t in self.terms]
         return terms + self.pattern_regexes
+
+    def ocr_term_matchers(self, relaxed: bool = False) -> list[re.Pattern[str]]:
+        """Regex de los términos para texto pasado por `ocr_normalize`."""
+        if self.word_only:
+            return [self._combined_ocr] if self.terms else []
+        return [_compile(term_regex(ocr_normalize(t), word_boundaries=not relaxed), 0) for t in self.terms]
 
     @property
     def samples(self) -> list[str]:
@@ -387,6 +429,7 @@ class Config(_Strict):
     logos: LogoPolicy = Field(default_factory=LogoPolicy)
     ocr: OcrPolicy = Field(default_factory=OcrPolicy)
     audit: AuditPolicy = Field(default_factory=AuditPolicy)
+    blacklist: BlacklistPolicy = Field(default_factory=BlacklistPolicy)
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Config:
@@ -410,6 +453,10 @@ def load_config(path: str | Path) -> Config:
     path = Path(path)
     raw = _load_raw(path, ())
     try:
+        raw = _with_blacklist(raw)
+    except BlacklistError as exc:
+        raise ConfigError(path, [f"blacklist: {m}" for m in exc.messages]) from None
+    try:
         return Config.model_validate(raw)
     except ValidationError as exc:
         raise ConfigError(path, _format_errors(exc, raw)) from None
@@ -429,6 +476,8 @@ def _load_raw(path: Path, chain: tuple[Path, ...]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(path, ["la config debe ser un diccionario YAML"])
 
+    if "blacklist" in data:
+        data["blacklist"] = resolve_paths(data["blacklist"], path.parent)
     parent_ref = data.pop("extends", None)
     disabled = data.pop("disable", [])
     if not isinstance(disabled, list):
@@ -453,12 +502,34 @@ def _load_raw(path: Path, chain: tuple[Path, ...]) -> dict[str, Any]:
     return merged
 
 
+def _with_blacklist(raw: dict[str, Any]) -> dict[str, Any]:
+    """Añade las sustituciones `kb-…` generadas desde los CSV de la lista negra.
+
+    Si la config ya tiene una entrada `kb-…` (p. ej. excepciones añadidas en
+    la UI), se combina con la generada en lugar de duplicarla.
+    """
+    try:
+        policy = BlacklistPolicy.model_validate(raw.get("blacklist") or {})
+    except ValidationError:
+        return raw  # el error lo da la validación de la config completa
+    subs = [r for r in raw.get("substitutions") or [] if isinstance(r, dict)]
+    overrides = {r["id"]: r for r in subs if str(r.get("id", "")).startswith(KB_PREFIX)}
+    generated = build_rules(policy, overrides)
+    if not generated and not overrides:
+        return raw
+    out = dict(raw)
+    kept = [r for r in raw.get("substitutions") or [] if not (isinstance(r, dict) and r.get("id") in overrides)]
+    # Las de la config van primero: a igualdad de coincidencia gana la regla anterior
+    out["substitutions"] = kept + generated
+    return out
+
+
 def _merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
     out = dict(parent)
     for key, value in child.items():
         if key in _RULE_BLOCKS and isinstance(value, list) and isinstance(out.get(key), list):
             out[key] = _merge_rules(out[key], value)
-        elif key in ("detection", "metadata", "redaction", "logos", "ocr", "audit") and isinstance(value, dict) and isinstance(out.get(key), dict):
+        elif key in ("detection", "metadata", "redaction", "logos", "ocr", "audit", "blacklist") and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], value)
         else:
             out[key] = value

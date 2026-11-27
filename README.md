@@ -94,6 +94,60 @@ solapes entre lista blanca y sustituciones (sale con código 1 si hay errores).
 **Las configs de cliente contienen los nombres que se quieren ocultar**: git
 solo versiona `base.yaml` y `example.yaml`.
 
+### Lista negra de la industria
+
+Además de las reglas del cliente, el software ya sabe qué buscar:
+`configs/blacklist/industria.csv` es una base de datos pública con más de mil
+empresas que aparecen en P&ID y PFD de petróleo y gas, química, gases
+industriales, farmacéutica y energía:
+
+| Categoría (`category`) | Qué incluye | Sustitución |
+|---|---|---|
+| `epc` | ingenierías y contratistas EPC/EPCM | `EPC-{n}` |
+| `licensor` | licenciantes de tecnología | `LICENSOR-{n}` |
+| `manufacturer` | fabricantes de equipos, válvulas, instrumentos y marcas | `VENDOR-{n}` |
+| `operator` | operadores, propietarios y gases industriales | `OPR-{n}` |
+
+`base.yaml` la carga con el bloque `blacklist` y la convierte en las
+sustituciones `kb-epc`, `kb-licensor`, `kb-manufacturer` y `kb-operator`.
+Columnas del CSV: `name,aliases,category,segment,industries,country,active,notes`
+(separador `,` o `;`, UTF-8; se edita bien en Excel). Los alias van separados
+por `|` y comparten denominación con el nombre principal: "Endress+Hauser" y
+"E+H" son el mismo `VENDOR-n`. Las marcas de un grupo (Fisher, Rosemount) van
+en filas propias para que `revert` devuelva el nombre correcto.
+
+Salvaguardas, porque un nombre de empresa puede ser vocabulario de P&ID:
+
+- solo palabras completas, también en OCR y en la auditoría ("Linde" no
+  encaja en "CYLINDER");
+- siglas en mayúsculas de hasta 5 caracteres distinguen mayúsculas;
+- se rechazan términos de menos de 3 caracteres, los formados solo por
+  vocabulario de P&ID ("Shell", "Crane", "Total", "Weir", "Gate Valve") y los
+  duplicados entre entidades; el error indica fichero y línea.
+
+```bash
+uv run blacklist stats                       # resumen por categoría e industria
+uv run blacklist find valve                  # buscar por nombre, alias o segmento
+uv run blacklist check "FISHER 667 / SHELL SIDE"
+uv run blacklist add "Nombre SA" --category fabricante --aliases "NSA|Nombre" --industries pharma
+```
+
+`add` (y **Añadir término…** en la UI con una regla `kb-…`) escribe en
+`configs/blacklist/propia.csv`, que git ignora: ahí van los nombres privados
+(clientes, plantas). Los nombres públicos de la industria pueden añadirse a
+`industria.csv` y versionarse. Todos los CSV de `configs/blacklist/` se
+consolidan al cargar la config. En la config del cliente:
+
+```yaml
+blacklist:
+  industries: [pharma]   # solo filas de estas industrias (y las generales)
+  exclude: [Vega]        # términos que no se buscan en este set
+  enabled: false         # desactivarla
+substitutions:
+  - id: kb-manufacturer  # excepciones de la lista (falsos positivos)
+    exceptions: [Samson]
+```
+
 ## Limpieza de metadatos (fase 3)
 
 ```bash
@@ -325,6 +379,7 @@ comprueba el paquete sin abrir ventanas (módulos, tesseract y OCR).
 ```
 src/sanitizer/   motores: metadatos, texto, zonas, logos, verificación
 configs/         reglas YAML por cliente o plantilla
+configs/blacklist/  lista negra de la industria (CSV)
 tests/           tests con PDFs sintéticos generados con reportlab
 data/            PDFs reales y mapas de sustitución (fuera de git)
 ```

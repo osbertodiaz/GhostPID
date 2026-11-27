@@ -46,6 +46,8 @@ def build() -> Path:
         f"{ROOT / 'configs' / 'base.yaml'}{sep}configs",
         "--add-data",
         f"{ROOT / 'configs' / 'example.yaml'}{sep}configs",
+        "--add-data",
+        f"{ROOT / 'configs' / 'blacklist' / 'industria.csv'}{sep}configs/blacklist",
         "--exclude-module",
         "cv2",
         "--exclude-module",

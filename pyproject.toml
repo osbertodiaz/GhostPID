@@ -26,6 +26,7 @@ anonymize = "sanitizer.pipeline:main"
 revert = "sanitizer.mapping:main"
 audit = "sanitizer.audit:main"
 review = "sanitizer.ui:main"
+blacklist = "sanitizer.blacklist:main"
 
 [dependency-groups]
 dev = [
