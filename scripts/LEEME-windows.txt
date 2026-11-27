@@ -23,4 +23,5 @@ Uso
 Importante: data\ y configs\<cliente>.yaml contienen los nombres reales que
 se quieren ocultar. No los compartas; comparte solo el PDF de data\out\.
 
+Manual completo: MANUAL.md (en esta carpeta).
 Código y documentación: https://github.com/osbertodiaz/PID_Anonymouse
