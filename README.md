@@ -26,6 +26,20 @@ uv sync
 uv run pytest
 ```
 
+## Diagnóstico de PDFs (fase 1)
+
+Inventario de solo lectura: metadatos Info y XMP, IDs del documento, adjuntos,
+anotaciones, capas (OCG), JavaScript, fuentes y tipo de cada página (texto
+vectorial, solo imagen, imagen con capa de texto o solo trazos).
+
+```bash
+uv run inventory data/ --out data/reports --json
+```
+
+Sin `--out`, el informe sale por pantalla. El informe reproduce datos reales
+(autor, títulos, nombres de capas), así que guárdalo solo dentro de `data/`:
+si `--out` apunta fuera, el comando avisa.
+
 ## Uso (previsto, fase 8)
 
 ```bash
