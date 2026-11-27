@@ -12,6 +12,8 @@ Una config tiene cuatro bloques:
 - `detection`: umbrales de los detectores de diagnóstico, por si un set de
   planos se sale de lo calibrado.
 - `metadata`: qué hacer con anotaciones, enlaces, capas y marcadores.
+- `redaction`: cómo se redacta el texto (relleno, qué se borra bajo cada
+  redacción según el tipo de página, capas ocultas, anotaciones).
 
 Las configs pueden heredar de otra con `extends` (ruta relativa al fichero).
 Al heredar:
@@ -19,7 +21,7 @@ Al heredar:
 - Las reglas y zonas se combinan por `id`: si el hijo repite un `id`, sus
   claves sobrescriben las del padre (p. ej. añadir `exceptions` a una regla
   base sin repetir su patrón); si no, se añaden.
-- `detection` y `metadata` se combinan clave a clave.
+- `detection`, `metadata` y `redaction` se combinan clave a clave.
 - `disable: [id, …]` quita reglas o zonas heredadas.
 
 Cada regla lleva ejemplos. Sirven para validar las regex y para detectar
@@ -47,6 +49,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from sanitizer.inventory import DetectionParams
 from sanitizer.metadata import MetadataPolicy
+from sanitizer.redact import RedactionPolicy
 
 SCHEMA_VERSION = 1
 
@@ -59,6 +62,10 @@ TOKEN_END = rf"(?![{TOKEN_CHARS}])"
 
 # Términos más cortos que esto pueden aparecer dentro de otras palabras o tags
 SHORT_TERM_LENGTH = 3
+
+# Números sueltos típicos de un P&ID (números de lazo, de equipo, de línea):
+# una sustitución que encaje con alguno puede destrozar tags apilados
+BARE_NUMBER_SAMPLES = ("12", "101", "4711", "01234", "070100", "123456")
 
 MM_TO_PT = 72 / 25.4
 
@@ -99,14 +106,15 @@ def _wrap(pattern: str, boundary: str, exceptions: list[str] | None = None) -> s
     return body
 
 
-def term_regex(term: str) -> str:
+def term_regex(term: str, word_boundaries: bool = True) -> str:
     """Regex de un término literal: palabra completa y espacios flexibles.
 
     Los espacios admiten saltos de línea o varios espacios, porque la
     extracción de texto de un PDF rara vez conserva el espaciado original.
     """
     words = term.split()
-    return r"(?<!\w)" + r"\s+".join(re.escape(w) for w in words) + r"(?!\w)"
+    body = r"\s+".join(re.escape(w) for w in words)
+    return rf"(?<!\w){body}(?!\w)" if word_boundaries else body
 
 
 class _Strict(BaseModel):
@@ -241,6 +249,13 @@ class SubstitutionRule(_Strict):
         return terms + self.pattern_regexes
 
     @property
+    def relaxed_matchers(self) -> list[re.Pattern[str]]:
+        """Como `matchers`, pero los términos encajan también dentro de otras
+        palabras (capas OCR con palabras pegadas)."""
+        terms = [_compile(term_regex(t, word_boundaries=False), self._flags) for t in self.terms]
+        return terms + self.pattern_regexes
+
+    @property
     def samples(self) -> list[str]:
         """Textos que esta regla debe sustituir: términos y ejemplos."""
         return self.terms + self.examples
@@ -343,6 +358,7 @@ class Config(_Strict):
     zones: list[Zone] = Field(default_factory=list)
     detection: DetectionParams = Field(default_factory=DetectionParams)
     metadata: MetadataPolicy = Field(default_factory=MetadataPolicy)
+    redaction: RedactionPolicy = Field(default_factory=RedactionPolicy)
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Config:
@@ -414,7 +430,7 @@ def _merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
     for key, value in child.items():
         if key in _RULE_BLOCKS and isinstance(value, list) and isinstance(out.get(key), list):
             out[key] = _merge_rules(out[key], value)
-        elif key in ("detection", "metadata") and isinstance(value, dict) and isinstance(out.get(key), dict):
+        elif key in ("detection", "metadata", "redaction") and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], value)
         else:
             out[key] = value
@@ -487,6 +503,9 @@ def check_overlaps(config: Config) -> list[Issue]:
       (la sustitución quedaría a medias).
     - aviso: el mismo término aparece en dos sustituciones.
     - aviso: términos muy cortos, que pueden aparecer dentro de otras palabras.
+    - aviso: patrones que encajan con números sueltos (números de lazo).
+    - error: el texto de sustitución vuelve a encajar con una sustitución
+      (la verificación posterior nunca pasaría).
     """
     issues: list[Issue] = []
 
@@ -526,6 +545,29 @@ def check_overlaps(config: Config) -> list[Issue]:
                             "warning",
                             f"'{sample}' (sustitución '{sub.id}') contiene '{m.group(0)}', "
                             f"protegido por la lista blanca '{wl.id}': la sustitución quedaría a medias",
+                        )
+                    )
+
+    for sub in config.substitutions:
+        numeric = [s for s in BARE_NUMBER_SAMPLES if any(rx.fullmatch(s) for rx in sub.pattern_regexes)]
+        if numeric:
+            issues.append(
+                Issue(
+                    "warning",
+                    f"la sustitución '{sub.id}' encaja con números sueltos ({', '.join(numeric)}): "
+                    f"puede alcanzar números de lazo o de equipo. Hazla más específica "
+                    f"(prefijo, longitud exacta) o comprueba el resultado",
+                )
+            )
+        sample = sub.replacement.format(n=1) if "{n}" in sub.replacement else sub.replacement
+        if sample:
+            for other in config.substitutions:
+                if any(rx.search(sample) for rx in other.matchers):
+                    issues.append(
+                        Issue(
+                            "error",
+                            f"el texto de sustitución '{sample}' de '{sub.id}' vuelve a encajar "
+                            f"con la sustitución '{other.id}'",
                         )
                     )
 
