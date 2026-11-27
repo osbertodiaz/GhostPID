@@ -12,6 +12,9 @@ El orden importa:
 6. Guardado (con los trazos que haya dejado el OCR) y verificación.
 
 La limpieza de metadatos (fase 3) va después, sobre el PDF resultante.
+
+Con `map_path`, el mapa de sustitución (fase 6) se carga si existe (la
+numeración sigue la de los documentos anteriores) y se guarda ampliado.
 """
 
 from __future__ import annotations
@@ -22,16 +25,26 @@ from pathlib import Path
 from typing import Any
 
 from sanitizer.logos import remove_logos
+from sanitizer.mapping import MapError, inside_data, load_map, namer_from_map, save_map, update_map
 from sanitizer.ocr import ocr_passes
 from sanitizer.redact import RedactionReport, Session
 from sanitizer.zones import apply_zones
 
 
-def anonymize(src: str | Path, dst: str | Path, config: Any) -> RedactionReport:
+def anonymize(
+    src: str | Path, dst: str | Path, config: Any, map_path: str | Path | None = None
+) -> RedactionReport:
     """Anonimiza el contenido de `src` (fases 4 y 5) y lo guarda en `dst`."""
     if Path(src).resolve() == Path(dst).resolve():
         raise ValueError("la salida no puede sobrescribir el PDF original")
-    with Session(src, config) as session:
+    existing = None
+    if map_path is not None:
+        map_path = Path(map_path)
+        # Se comprueba antes de trabajar, no al final del proceso
+        if not inside_data(map_path):
+            raise MapError(f"el mapa contiene los valores originales: solo se guarda dentro de data/ (no en {map_path})")
+        existing = load_map(map_path) if map_path.exists() else None
+    with Session(src, config, namer=namer_from_map(existing)) as session:
         session.snapshot()
         apply_zones(session)
         remove_logos(session)
@@ -41,6 +54,8 @@ def anonymize(src: str | Path, dst: str | Path, config: Any) -> RedactionReport:
         ocr_passes(session)
         session.save(dst)
     session.verify(dst)
+    if map_path is not None:
+        save_map(update_map(existing, session.namer, src, dst, config.name), map_path)
     return session.report
 
 
@@ -83,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--report", type=Path, help="JSON con cada sustitución (contiene valores originales: en data/)"
     )
+    parser.add_argument(
+        "--map",
+        type=Path,
+        help="mapa de sustitución (data/maps/…): se reutiliza si existe y se guarda ampliado",
+    )
     args = parser.parse_args(argv)
 
     from sanitizer.rules import ConfigError, load_config  # evita import circular
@@ -92,8 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         parser.error(f"config inválida: {exc}")
     try:
-        report = anonymize(args.pdf, args.output, config)
-    except ValueError as exc:
+        report = anonymize(args.pdf, args.output, config, args.map)
+    except (ValueError, MapError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -105,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(report.to_json(), encoding="utf-8")
         print(f"  informe: {args.report}")
+    if args.map:
+        print(f"  mapa: {args.map}")
     if report.problems:
         print("VERIFICACIÓN FALLIDA:", file=sys.stderr)
         for p in report.problems:
