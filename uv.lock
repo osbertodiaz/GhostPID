@@ -289,13 +289,16 @@ dependencies = [
     { name = "pikepdf" },
     { name = "pydantic" },
     { name = "pymupdf" },
+    { name = "pyqt6" },
     { name = "pytesseract" },
     { name = "pyyaml" },
+    { name = "ruamel-yaml" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pytest-qt" },
     { name = "reportlab" },
 ]
 
@@ -306,13 +309,16 @@ requires-dist = [
     { name = "pikepdf", specifier = ">=9.0" },
     { name = "pydantic", specifier = ">=2.14.4" },
     { name = "pymupdf", specifier = ">=1.24" },
+    { name = "pyqt6", specifier = ">=6.12.1" },
     { name = "pytesseract", specifier = ">=0.3.13" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruamel-yaml", specifier = ">=0.19.1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-qt", specifier = ">=4.5.0" },
     { name = "reportlab", specifier = ">=4.2" },
 ]
 
@@ -545,6 +551,49 @@ wheels = [
 ]
 
 [[package]]
+name = "pyqt6"
+version = "6.12.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyqt6-qt6" },
+    { name = "pyqt6-sip" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/5f/39d2cf3eabc36006a5c87df6e1ed34928025b4a1768d752859bf404ec341/pyqt6-6.12.1.tar.gz", hash = "sha256:17bb18b3ae953ab54b23026291ecea2579b028597b56c281a752c8ed66dd1a58", size = 1108330, upload-time = "2026-11-14T14:52:49.456Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/bd/3a0264000c18bcc7df045bdd9609c92062d7047f83692a7e4a4258ad4e48/pyqt6-6.12.1-cp310-abi3-macosx_14_0_universal2.whl", hash = "sha256:f3c5588b42e786e25d94e070366762225a863de77c884a6aabc7553a9eeb98ad", size = 12690786, upload-time = "2026-11-14T14:52:38.18Z" },
+    { url = "https://files.pythonhosted.org/packages/68/2a/869f7452ba0368b4e1ddbe9679f6fbf1ade5251861a87e1f58acd4215e1b/pyqt6-6.12.1-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:b432aa5ffbdaf90a0b909fd47cb1aa908808ae20928561beed0db9fe2ac6347e", size = 8505955, upload-time = "2026-11-14T14:52:41.233Z" },
+    { url = "https://files.pythonhosted.org/packages/17/10/bd39e3799aefa74501e4f51f0ccaf05d954dca4d86009140fb54b4c42954/pyqt6-6.12.1-cp310-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:04d189a18acdd8d5d64f3e99152af42381f26761f1e84c049dec317efe5372a9", size = 8517695, upload-time = "2026-11-14T14:52:43.388Z" },
+    { url = "https://files.pythonhosted.org/packages/22/a2/9b45fd134614f76ea9ba37dded8e57360a6a8d73407bff6a93bc214aed01/pyqt6-6.12.1-cp310-abi3-win_amd64.whl", hash = "sha256:91c3a6a520f3e35e022bb7e05a6bf7d47d5b25eb0f0d6ca9c734c18d12d470ff", size = 7092507, upload-time = "2026-11-14T14:52:45.497Z" },
+    { url = "https://files.pythonhosted.org/packages/01/7a/c7580ca2d2c49753e1f48dab77d4360859e45e8b64e90b6a3c3c2509b241/pyqt6-6.12.1-cp310-abi3-win_arm64.whl", hash = "sha256:86f77dcb30882014fce9fe0912d9d7aed7f20f17b957b7c5fb0ee67410e89870", size = 6120775, upload-time = "2026-11-14T14:52:47.255Z" },
+]
+
+[[package]]
+name = "pyqt6-qt6"
+version = "6.12.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/81/6f1976a8c2bbfb5c8a7f282d25864ddbf9cd7aa4da8c8cf0b75796f3838a/pyqt6_qt6-6.12.1-py3-none-macosx_10_14_x86_64.whl", hash = "sha256:2281045392c42924108d954b66f7dbd2b4f4c87f16c2dac5ee54c7be285d1a99", size = 69600237, upload-time = "2026-11-24T21:17:31.578Z" },
+    { url = "https://files.pythonhosted.org/packages/55/d1/0a06fbe3bd62fae4f20c1d8553f0586a239381d011e29354e3ab44fd1903/pyqt6_qt6-6.12.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:79ffa2afd4d196bd24ea91c798927b047f15a2cda24fdcab5b1b96df2c84d1ef", size = 63521363, upload-time = "2026-11-24T21:18:19.601Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/eb/4540b5d63a68629b62acb02c4163becdd8d41dca6784fa0fc7feffec6ca5/pyqt6_qt6-6.12.1-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:33208952342131e0477a461e31c654b679fa71b2b32af96422587ed0ea3e47ca", size = 88791593, upload-time = "2026-11-24T21:18:55.62Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/92/f38f9a1fe007458cce9d2936bfdae57851bc3c3f0c8412923a73c24d00b0/pyqt6_qt6-6.12.1-py3-none-manylinux_2_39_aarch64.whl", hash = "sha256:d33dbe32aa5bd9d49dba3ca65b1b96875bf9888447ec3b291253725cad5b7cb2", size = 89623542, upload-time = "2026-11-24T21:19:37.566Z" },
+    { url = "https://files.pythonhosted.org/packages/28/c6/26fd9524059e71a2ae89c5c8bd7e8f2358e49641b0273471e3f9ad13f902/pyqt6_qt6-6.12.1-py3-none-win_amd64.whl", hash = "sha256:1ab5f90b863cbc074f8f097a9ddf8bfff7efa6a3048e4bb59bb94fc904a5ac91", size = 77883468, upload-time = "2026-11-24T21:20:54.195Z" },
+    { url = "https://files.pythonhosted.org/packages/96/93/1b8932e71642fb37b018644c1af52af61e2b02ea980e03a658c48e3344fe/pyqt6_qt6-6.12.1-py3-none-win_arm64.whl", hash = "sha256:2a5fcffb71a07cb434485004fd7ad83e76766de08142cc30802f9fd386f00ecb", size = 63163844, upload-time = "2026-11-24T21:21:25.454Z" },
+]
+
+[[package]]
+name = "pyqt6-sip"
+version = "13.13.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/da/164fe6759acbd04c4523a9471c4d11f4b3c744182cb7bbd87faf249ce172/pyqt6_sip-13.13.1.tar.gz", hash = "sha256:83c3c9cb93b6c631af7048084fb0f234b610a01edbf9b2b44c4ee4bda4197efe", size = 95283, upload-time = "2026-11-11T12:33:32.625Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/b6/76f5d8aa751f0a2409a38220aadcc4ed7809045425991fbfcc41fc7fef66/pyqt6_sip-13.13.1-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:8c3ca59c49c39dc518193384ea3d2e842b168c0d5562a5834d22d177cee94369", size = 114065, upload-time = "2026-11-11T12:33:02.419Z" },
+    { url = "https://files.pythonhosted.org/packages/70/01/6b4cd724cf503ec58418f40a7a9c110394032ad48e6b209cca0bf2d76769/pyqt6_sip-13.13.1-cp312-cp312-manylinux1_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:5417e01a4b3079d60dc9401739c1a851ec7a2267b67b5cc57424a202b6f75044", size = 302313, upload-time = "2026-11-11T12:33:05.404Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/ab/7f6b190ebe3e96832a531db2490a09996844159f575c1d5fdcee9988968c/pyqt6_sip-13.13.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9ce18cb83284bc233366b9337cdf1dcefd4054aeaa87f9b76650aba240b6193d", size = 323491, upload-time = "2026-11-11T12:33:03.614Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/61/a172e0dd7800e4ea708c58c02099ace2d77094231144cbca4bb1f590c2cb/pyqt6_sip-13.13.1-cp312-cp312-win_amd64.whl", hash = "sha256:5413111b1d3bf4e6672b97bfb2cc47eaa781d8e215d96ea2c62733e1373dfe4f", size = 53756, upload-time = "2026-11-11T12:33:06.604Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/4f/2b66f1dd0b62c308c591b02af450b3519ba1ad763ff99b4aeeb09f8071be/pyqt6_sip-13.13.1-cp312-cp312-win_arm64.whl", hash = "sha256:de44a446767ee232f7d94f189124bb483c2bd63ae52166d29b5e7687691164aa", size = 49099, upload-time = "2026-11-11T12:33:07.739Z" },
+]
+
+[[package]]
 name = "pytesseract"
 version = "0.3.13"
 source = { registry = "https://pypi.org/simple" }
@@ -571,6 +620,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/79/42/bb4641652e58dedeac2ec51abc1f8cae4fee4ec63899a0999016229a0f2a/pytest-9.2.0.tar.gz", hash = "sha256:97c4f3b1f3c7414aa36465e09b8220f1d03627993bd51b1282e193753c80557b", size = 1797555, upload-time = "2026-10-27T21:30:20.728Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/39/1f5d8c8877a0fa327db959c19341d4be61660de1ab6b7391f9eb805bcd67/pytest-9.2.0-py3-none-any.whl", hash = "sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588", size = 411776, upload-time = "2026-10-27T21:30:19.131Z" },
+]
+
+[[package]]
+name = "pytest-qt"
+version = "4.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pluggy" },
+    { name = "pytest" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d3/61/8bdec02663c18bf5016709b909411dce04a868710477dc9b9844ffcf8dd2/pytest_qt-4.5.0.tar.gz", hash = "sha256:51620e01c488f065d2036425cbc1cbcf8a6972295105fd285321eb47e66a319f", size = 128702, upload-time = "2025-07-01T17:24:39.889Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/d0/8339b888ad64a3d4e508fed8245a402b503846e1972c10ad60955883dcbb/pytest_qt-4.5.0-py3-none-any.whl", hash = "sha256:ed21ea9b861247f7d18090a26bfbda8fb51d7a8a7b6f776157426ff2ccf26eff", size = 37214, upload-time = "2025-07-01T17:24:38.226Z" },
 ]
 
 [[package]]
@@ -602,6 +665,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c8/b8/9fa1c49fbc6fb9f4c9f2445123af346792b7fef220152004b13ec51b37ee/reportlab-5.1.2.tar.gz", hash = "sha256:2d2785281fc435e39fb33eee7f8c10b10ffee626dad9de360310390aacaf2f38", size = 3794521, upload-time = "2026-11-25T16:08:24.398Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/bb/603afbaa72589bd9519bef5d631c099407a6853465814e6a22b77a7b12d3/reportlab-5.1.2-py3-none-any.whl", hash = "sha256:8ec602de18aff4db94f3b5846f877e66edbcb42969c4100b2ae5dd69a7f3e84e", size = 2017267, upload-time = "2026-11-25T16:07:57.882Z" },
+]
+
+[[package]]
+name = "ruamel-yaml"
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/3b/ebda527b56beb90cb7652cb1c7e4f91f48649fbcd8d2eb2fb6e77cd3329b/ruamel_yaml-0.19.1.tar.gz", hash = "sha256:53eb66cd27849eff968ebf8f0bf61f46cdac2da1d1f3576dd4ccee9b25c31993", size = 142709, upload-time = "2026-01-02T16:50:31.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl", hash = "sha256:27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93", size = 118102, upload-time = "2026-01-02T16:50:29.201Z" },
 ]
 
 [[package]]
