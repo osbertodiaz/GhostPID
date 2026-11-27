@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pymupdf
-from PyQt6.QtCore import QObject, QPointF, QRectF, QRunnable, Qt, QThreadPool, QUrl, pyqtSignal
+from PyQt6.QtCore import QLibraryInfo, QObject, QPointF, QRectF, QRunnable, Qt, QThreadPool, QTranslator, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QBrush, QColor, QDesktopServices, QImage, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -65,12 +65,16 @@ from sanitizer.review import (
     discard,
     discard_action,
     generate,
+    kind_description,
+    kind_name,
     load_existing,
     locate,
+    origin_name,
     preview,
     zone_fraction,
 )
 from sanitizer.rules import Category
+from sanitizer.i18n import current_language, tr
 
 COLORS: dict[str, str] = {
     "sustitución": "#2e9d4f",
@@ -84,6 +88,17 @@ COLORS: dict[str, str] = {
     "seleccion": "#ff00aa",
 }
 MAX_RENDER_SIDE = 4000  # px del lado mayor al renderizar una página
+
+
+def install_translations(app: QApplication) -> None:
+    """Botones y diálogos estándar de Qt (Aceptar, Cancelar, Sí…) en el idioma de la app."""
+    if getattr(app, "_pid_translator", None) is not None:
+        return
+    translator = QTranslator(app)
+    folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+    if translator.load(f"qtbase_{current_language()}", folder):
+        app.installTranslator(translator)
+        app._pid_translator = translator  # type: ignore[attr-defined]
 
 
 # --------------------------------------------------------------------------
@@ -157,7 +172,7 @@ class PageView(QGraphicsView):
         for rect in rects:
             item = self.scene().addRect(self.to_scene(page, rect), pen, QBrush(fill))
             item.setData(0, index)
-            item.setToolTip(kind)
+            item.setToolTip(kind_name(kind))
             self._items.setdefault(index, []).append(item)
 
     def highlight(self, page: pymupdf.Page, rects: list[tuple]) -> None:
@@ -234,27 +249,27 @@ class TermDialog(QDialog):
 
     def __init__(self, parent: QWidget, rules: list[Any], text: str, rule_id: str = "") -> None:
         super().__init__(parent)
-        self.setWindowTitle("Añadir término a las reglas")
+        self.setWindowTitle(tr("Añadir término a las reglas", "Add term to the rules"))
         form = QFormLayout(self)
         self.text = QLineEdit(" ".join(text.split()))
-        form.addRow("Término (texto literal):", self.text)
+        form.addRow(tr("Término (texto literal):", "Term (literal text):"), self.text)
         self.rule = QComboBox()
         for r in rules:
-            where = "  · lista negra (CSV)" if r.word_only else ""
-            self.rule.addItem(f"{r.id} → {r.replacement or '(eliminar)'}  [{r.category.value}]{where}", r.id)
-        self.rule.addItem("➕ Nueva regla…", "")
+            where = tr("  · lista negra (CSV)", "  · blacklist (CSV)") if r.word_only else ""
+            self.rule.addItem(f"{r.id} → {r.replacement or tr('(eliminar)', '(remove)')}  [{r.category.value}]{where}", r.id)
+        self.rule.addItem(tr("➕ Nueva regla…", "➕ New rule…"), "")
         if rule_id:
             self.rule.setCurrentIndex(max(0, self.rule.findData(rule_id)))
-        form.addRow("Regla:", self.rule)
+        form.addRow(tr("Regla:", "Rule:"), self.rule)
         self.new_id = QLineEdit()
-        self.new_id.setPlaceholderText("p. ej. plant_name")
+        self.new_id.setPlaceholderText(tr("p. ej. plant_name", "e.g. plant_name"))
         self.category = QComboBox()
         self.category.addItems([c.value for c in Category])
         self.replacement = QLineEdit()
-        self.replacement.setPlaceholderText("p. ej. SITE o VENDOR-{n}")
-        form.addRow("Id de la nueva regla:", self.new_id)
-        form.addRow("Categoría:", self.category)
-        form.addRow("Sustitución:", self.replacement)
+        self.replacement.setPlaceholderText(tr("p. ej. SITE o VENDOR-{n}", "e.g. SITE or VENDOR-{n}"))
+        form.addRow(tr("Id de la nueva regla:", "New rule id:"), self.new_id)
+        form.addRow(tr("Categoría:", "Category:"), self.category)
+        form.addRow(tr("Sustitución:", "Replacement:"), self.replacement)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -280,22 +295,22 @@ class TermDialog(QDialog):
 class ZoneDialog(QDialog):
     def __init__(self, parent: QWidget, page: int, fraction: tuple) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Nueva zona")
+        self.setWindowTitle(tr("Nueva zona", "New zone"))
         form = QFormLayout(self)
-        form.addRow(QLabel("Rectángulo (fracción de página): " + ", ".join(f"{v:.3f}" for v in fraction)))
+        form.addRow(QLabel(tr("Rectángulo (fracción de página): ", "Rectangle (page fraction): ") + ", ".join(f"{v:.3f}" for v in fraction)))
         self.scope = QComboBox()
-        self.scope.addItem(f"Solo esta página ({page})", "page")
-        self.scope.addItem("Todas las páginas", "all")
-        self.scope.addItem("Páginas…", "list")
-        form.addRow("Aplicar a:", self.scope)
+        self.scope.addItem(tr("Solo esta página ({p})", "This page only ({p})", p=page), "page")
+        self.scope.addItem(tr("Todas las páginas", "All pages"), "all")
+        self.scope.addItem(tr("Páginas…", "Pages…"), "list")
+        form.addRow(tr("Aplicar a:", "Apply to:"), self.scope)
         self.pages = QLineEdit()
-        self.pages.setPlaceholderText("p. ej. 1, 3-7, -1")
-        form.addRow("Páginas:", self.pages)
+        self.pages.setPlaceholderText(tr("p. ej. 1, 3-7, -1", "e.g. 1, 3-7, -1"))
+        form.addRow(tr("Páginas:", "Pages:"), self.pages)
         self.label = QLineEdit()
-        self.label.setPlaceholderText("opcional, p. ej. [CAJETÍN]")
-        form.addRow("Texto en la zona:", self.label)
+        self.label.setPlaceholderText(tr("opcional, p. ej. [CAJETÍN]", "optional, e.g. [TITLE BLOCK]"))
+        form.addRow(tr("Texto en la zona:", "Text in the zone:"), self.label)
         self.description = QLineEdit()
-        form.addRow("Descripción:", self.description)
+        form.addRow(tr("Descripción:", "Description:"), self.description)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -320,7 +335,7 @@ def parse_pages(text: str) -> list[int | str]:
             continue
         out.append(int(part) if part.lstrip("-").isdigit() else part)
     if not out:
-        raise ValueError("indica al menos una página")
+        raise ValueError(tr("indica al menos una página", "give at least one page"))
     return out
 
 
@@ -356,7 +371,7 @@ class ReviewWindow(QMainWindow):
         self.anonymized: pymupdf.Document | None = None
         self._jobs: list[_Job] = []
         self._rows: list[int] = []  # fila → índice en state.detections
-        self.setWindowTitle(f"Revisión · {self.src.name} · {self.config_path.name}")
+        self.setWindowTitle(tr("Revisión · {pdf} · {cfg}", "Review · {pdf} · {cfg}", pdf=self.src.name, cfg=self.config_path.name))
         self.resize(1500, 950)
         self._build()
         self._show_page()
@@ -364,10 +379,12 @@ class ReviewWindow(QMainWindow):
     # Construcción ---------------------------------------------------------
 
     def _build(self) -> None:
-        bar = QToolBar("Acciones")
+        bar = QToolBar(tr("Acciones", "Actions"))
         self.addToolBar(bar)
         self.prev_btn = QPushButton("◀")
+        self.prev_btn.setToolTip(tr("Página anterior", "Previous page"))
         self.next_btn = QPushButton("▶")
+        self.next_btn.setToolTip(tr("Página siguiente", "Next page"))
         self.page_box = QSpinBox()
         self.page_box.setRange(1, len(self.original))
         self.page_box.setSuffix(f" / {len(self.original)}")
@@ -377,20 +394,20 @@ class ReviewWindow(QMainWindow):
         for w in (self.prev_btn, self.page_box, self.next_btn):
             bar.addWidget(w)
         bar.addSeparator()
-        self.view_toggle = QAction("Ver anonimizado", self, checkable=True)
+        self.view_toggle = QAction(tr("Ver anonimizado", "Show anonymized"), self, checkable=True)
         self.view_toggle.toggled.connect(self.set_anonymized_view)
         bar.addAction(self.view_toggle)
-        bar.addAction("Ajustar", lambda: self.view.fit())
+        bar.addAction(tr("Ajustar", "Fit"), lambda: self.view.fit())
         bar.addAction("＋", lambda: self.view.zoom(1.25))
         bar.addAction("－", lambda: self.view.zoom(0.8))
         bar.addSeparator()
-        self.zone_action = QAction("Dibujar zona", self, checkable=True)
+        self.zone_action = QAction(tr("Dibujar zona", "Draw zone"), self, checkable=True)
         self.zone_action.toggled.connect(lambda on: self.view.set_drawing(on))
         bar.addAction(self.zone_action)
         bar.addSeparator()
-        self.refresh_action = bar.addAction("Recalcular", lambda: self.run_preview(ocr=False))
-        self.ocr_action = bar.addAction("Con OCR", lambda: self.run_preview(ocr=True))
-        self.generate_action = bar.addAction("Confirmar y generar", self.on_generate)
+        self.refresh_action = bar.addAction(tr("Recalcular", "Recalculate"), lambda: self.run_preview(ocr=False))
+        self.ocr_action = bar.addAction(tr("Con OCR", "With OCR"), lambda: self.run_preview(ocr=True))
+        self.generate_action = bar.addAction(tr("Confirmar y generar", "Confirm and generate"), self.on_generate)
 
         self.view = PageView()
         self.view.zone_drawn.connect(self.on_zone_drawn)
@@ -406,9 +423,9 @@ class ReviewWindow(QMainWindow):
         grid.setContentsMargins(0, 0, 0, 0)
         self.kind_boxes: dict[str, QCheckBox] = {}
         for kind in KINDS:
-            box = QCheckBox(kind)
+            box = QCheckBox(kind_name(kind))
             box.setChecked(True)
-            box.setToolTip(KINDS[kind])
+            box.setToolTip(kind_description(kind))
             box.setStyleSheet(f"color: {COLORS[kind]}; font-weight: bold;")
             box.toggled.connect(self._refresh)
             self.kind_boxes[kind] = box
@@ -421,13 +438,15 @@ class ReviewWindow(QMainWindow):
         for kind in list(KINDS)[4:]:
             grid2.addWidget(self.kind_boxes[kind])
         layout.addWidget(filters2)
-        self.page_only = QCheckBox("Solo esta página")
+        self.page_only = QCheckBox(tr("Solo esta página", "This page only"))
         self.page_only.setChecked(True)
         self.page_only.toggled.connect(self._refresh)
         layout.addWidget(self.page_only)
 
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Tipo", "Pág.", "Texto", "Detalle", "Regla"])
+        self.table.setHorizontalHeaderLabels(
+            [tr("Tipo", "Type"), tr("Pág.", "Page"), tr("Texto", "Text"), tr("Detalle", "Detail"), tr("Regla", "Rule")]
+        )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -437,9 +456,9 @@ class ReviewWindow(QMainWindow):
         layout.addWidget(self.table, 1)
 
         buttons = QHBoxLayout()
-        self.discard_btn = QPushButton("Descartar")
+        self.discard_btn = QPushButton(tr("Descartar", "Discard"))
         self.discard_btn.clicked.connect(self.on_discard)
-        self.term_btn = QPushButton("Añadir término…")
+        self.term_btn = QPushButton(tr("Añadir término…", "Add term…"))
         self.term_btn.clicked.connect(self.on_add_term)
         buttons.addWidget(self.discard_btn)
         buttons.addWidget(self.term_btn)
@@ -448,7 +467,7 @@ class ReviewWindow(QMainWindow):
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(500)
         layout.addWidget(self.log)
-        self.report_btn = QPushButton("Abrir informe de auditoría")
+        self.report_btn = QPushButton(tr("Abrir informe de auditoría", "Open audit report"))
         self.report_btn.clicked.connect(self.open_report)
         self.report_btn.setEnabled(False)
         layout.addWidget(self.report_btn)
@@ -467,7 +486,7 @@ class ReviewWindow(QMainWindow):
         state = load_existing(self.src, self.config_path, self.out_dir, self.reports_dir)
         if state is not None:
             self.set_state(state)
-            self.say("Informes de un proceso anterior cargados.")
+            self.say(tr("Informes de un proceso anterior cargados.", "Reports from a previous run loaded."))
         else:
             self.run_preview(ocr=False)
 
@@ -487,20 +506,25 @@ class ReviewWindow(QMainWindow):
 
     def _update_status(self) -> None:
         if self.busy:
-            text = "⏳ Trabajando…"
+            text = tr("⏳ Trabajando…", "⏳ Working…")
         elif self.state is None:
-            text = "Sin detecciones todavía."
+            text = tr("Sin detecciones todavía.", "No detections yet.")
         else:
             counts: dict[str, int] = {}
             for d in self.state.detections:
                 counts[d.kind] = counts.get(d.kind, 0) + 1
-            text = f"Origen: {self.state.origin} · " + ", ".join(f"{k} {v}" for k, v in counts.items())
+            text = tr("Origen: {o} · ", "Source: {o} · ", o=origin_name(self.state.origin)) + ", ".join(
+                f"{kind_name(k)} {v}" for k, v in counts.items()
+            )
             if self.state.audit is not None and self.state.origin in ("informes", "generado"):
-                text += " · auditoría " + ("OK" if self.state.audit.get("ok") else "con FALLOS")
+                text += tr(" · auditoría ", " · audit ") + ("OK" if self.state.audit.get("ok") else tr("con FALLOS", "with FAILURES"))
             if self.state.origin == "vista previa":
-                text += "\nSin OCR: no aparece el texto en trazos ni el escaneado. Para verlo, «Con OCR»."
+                text += tr(
+                    "\nSin OCR: no aparece el texto en trazos ni el escaneado. Para verlo, «Con OCR».",
+                    "\nNo OCR: text drawn as paths and scanned text are not shown. To see them, use “With OCR”.",
+                )
         if self.stale:
-            text += "\n⚠ La config cambió: pulsa «Recalcular» para ver el efecto."
+            text += tr("\n⚠ La config cambió: pulsa «Recalcular» para ver el efecto.", "\n⚠ The config changed: press “Recalculate” to see the effect.")
         self.status.setText(text)
         for action in (self.refresh_action, self.ocr_action, self.generate_action):
             action.setEnabled(not self.busy)
@@ -550,26 +574,30 @@ class ReviewWindow(QMainWindow):
 
     def run_preview(self, ocr: bool = False) -> None:
         config = self.editor.config
-        self.say("Vista previa" + (" con OCR (puede tardar)" if ocr else " rápida (sin OCR)") + "…")
+        self.say(tr("Vista previa con OCR (puede tardar)…", "Preview with OCR (may take a while)…") if ocr else tr("Vista previa rápida (sin OCR)…", "Quick preview (no OCR)…"))
         self._run(
             lambda progress: preview(self.src, config, self.reports_dir, self.maps_dir, ocr, progress),
-            lambda state: (self.set_state(state), self.say(f"Listo: {len(state.detections)} detecciones.")),
+            lambda state: (self.set_state(state), self.say(tr("Listo: {n} detecciones.", "Done: {n} detections.", n=len(state.detections)))),
         )
 
     def run_generate(self) -> None:
         config = self.editor.config
-        self.say("Generando: anonimizado, metadatos, auditoría y autocorrección…")
+        self.say(tr("Generando: anonimizado, metadatos, auditoría y autocorrección…", "Generating: anonymization, metadata, audit and self-repair…"))
 
         def done(result: Any) -> None:
             doc_result, state = result
             if state is not None:
                 self.set_state(state)
-            status = "OK" if doc_result.ok else "con FALLOS"
+            status = "OK" if doc_result.ok else tr("con FALLOS", "with FAILURES")
             self.say(
-                f"Generado {status}: {doc_result.output} · {doc_result.substitutions} sustituciones · "
-                f"restos {doc_result.leftovers} · para revisar {doc_result.review_lines} · {doc_result.seconds:.0f} s"
+                tr(
+                    "Generado {st}: {out} · {n} sustituciones · restos {l} · para revisar {r} · {s:.0f} s",
+                    "Generated {st}: {out} · {n} substitutions · leftovers {l} · to review {r} · {s:.0f} s",
+                    st=status, out=doc_result.output, n=doc_result.substitutions,
+                    l=doc_result.leftovers, r=doc_result.review_lines, s=doc_result.seconds,
+                )
             )
-            self.say(f"Informe: {self._report_path()}")
+            self.say(tr("Informe: {p}", "Report: {p}", p=self._report_path()))
             self.view_toggle.setChecked(True)
 
         self._run(
@@ -598,7 +626,7 @@ class ReviewWindow(QMainWindow):
 
     def set_anonymized_view(self, on: bool) -> None:
         if on and self.anonymized is None:
-            self.say("Todavía no hay versión anonimizada.")
+            self.say(tr("Todavía no hay versión anonimizada.", "There is no anonymized version yet."))
         self.show_anonymized = on
         self._show_page()
 
@@ -630,7 +658,7 @@ class ReviewWindow(QMainWindow):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 page = str(d.page) if d.page else ", ".join(map(str, d.pages[:6])) + ("…" if len(d.pages) > 6 else "")
-                for col, value in enumerate((d.kind, page, d.text, d.detail, d.rule)):
+                for col, value in enumerate((kind_name(d.kind), page, d.text, d.detail, d.rule)):
                     item = QTableWidgetItem(value)
                     if col == 0:
                         item.setForeground(QBrush(QColor(COLORS[d.kind])))
@@ -673,36 +701,46 @@ class ReviewWindow(QMainWindow):
     def discard_selected(self) -> str:
         d = self.selected()
         if d is None:
-            raise ValueError("no hay ninguna detección seleccionada")
+            raise ValueError(tr("no hay ninguna detección seleccionada", "no detection is selected"))
         action = discard(self.editor, d)
-        self.mark_stale(f"Descartado: {action}.")
+        self.mark_stale(tr("Descartado: {a}.", "Discarded: {a}.", a=action))
         return action
 
     def add_term(self, rule_id: str, text: str) -> None:
         self.editor.add_term(rule_id, text)
-        self.mark_stale(f"Término '{' '.join(text.split())}' añadido a la regla '{rule_id}'.")
+        self.mark_stale(tr("Término '{t}' añadido a la regla '{r}'.", "Term '{t}' added to rule '{r}'.", t=" ".join(text.split()), r=rule_id))
 
     def add_rule(self, rule_id: str, category: str, replacement: str, text: str) -> None:
         self.editor.add_rule(rule_id, category, replacement, [text])
-        self.mark_stale(f"Regla nueva '{rule_id}' ({category} → {replacement or '(eliminar)'}) con '{text}'.")
+        self.mark_stale(
+            tr(
+                "Regla nueva '{r}' ({c} → {rep}) con '{t}'.",
+                "New rule '{r}' ({c} → {rep}) with '{t}'.",
+                r=rule_id, c=category, rep=replacement or tr("(eliminar)", "(remove)"), t=text,
+            )
+        )
 
     def create_zone(self, view_rect: tuple, pages: str | list[int | str], label: str = "", description: str = "") -> str:
         page = self.original[self.page_number - 1]
         zone_id, _ = self.editor.add_zone(zone_fraction(page, view_rect), pages, label, description)
-        self.mark_stale(f"Zona '{zone_id}' añadida (páginas: {pages}).")
+        self.mark_stale(tr("Zona '{z}' añadida (páginas: {p}).", "Zone '{z}' added (pages: {p}).", z=zone_id, p=pages))
         return zone_id
 
     def _guard(self, fn: Callable[[], Any]) -> None:
         try:
             fn()
         except (EditError, ValueError) as exc:
-            QMessageBox.warning(self, "Cambio rechazado", str(exc))
+            QMessageBox.warning(self, tr("Cambio rechazado", "Change rejected"), str(exc))
 
     def on_discard(self) -> None:
         d = self.selected()
         if d is None:
             return
-        answer = QMessageBox.question(self, "Descartar detección", f"Se guardará en la config: {discard_action(d)}.\n¿Seguir?")
+        answer = QMessageBox.question(
+            self,
+            tr("Descartar detección", "Discard detection"),
+            tr("Se guardará en la config: {a}.\n¿Seguir?", "This will be saved in the config: {a}.\nContinue?", a=discard_action(d)),
+        )
         if answer == QMessageBox.StandardButton.Yes:
             self._guard(self.discard_selected)
 
@@ -727,12 +765,17 @@ class ReviewWindow(QMainWindow):
         self.zone_action.setChecked(False)
 
     def on_generate(self) -> None:
-        note = "\n\nOjo: hay cambios en la config que aún no has recalculado." if self.stale else ""
+        note = tr("\n\nOjo: hay cambios en la config que aún no has recalculado.", "\n\nNote: there are config changes you have not recalculated yet.") if self.stale else ""
         answer = QMessageBox.question(
             self,
-            "Confirmar y generar",
-            f"Se ejecutará el proceso completo con OCR, metadatos, auditoría y autocorrección "
-            f"({self.repair_passes} pasada/s).\nSalida: {self.out_dir / (self.src.stem + '.sanitized.pdf')}{note}\n\n¿Generar?",
+            tr("Confirmar y generar", "Confirm and generate"),
+            tr(
+                "Se ejecutará el proceso completo con OCR, metadatos, auditoría y autocorrección "
+                "({n} pasada/s).\nSalida: {out}{note}\n\n¿Generar?",
+                "The full process will run with OCR, metadata, audit and self-repair "
+                "({n} pass(es)).\nOutput: {out}{note}\n\nGenerate?",
+                n=self.repair_passes, out=self.out_dir / (self.src.stem + ".sanitized.pdf"), note=note,
+            ),
         )
         if answer == QMessageBox.StandardButton.Yes:
             self.run_generate()
@@ -759,27 +802,36 @@ class ReviewWindow(QMainWindow):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="review",
-        description="UI de revisión: ver y descartar detecciones, añadir términos y zonas, y generar el PDF anonimizado.",
+        description=tr(
+            "UI de revisión: ver y descartar detecciones, añadir términos y zonas, y generar el PDF anonimizado.",
+            "Review UI: view and discard detections, add terms and zones, and generate the anonymized PDF.",
+        ),
     )
-    parser.add_argument("pdf", type=Path, help="PDF original")
-    parser.add_argument("--config", type=Path, required=True, help="config YAML del cliente (se edita desde la UI)")
+    parser.add_argument("pdf", type=Path, help=tr("PDF original", "original PDF"))
+    parser.add_argument("--config", type=Path, required=True, help=tr("config YAML del cliente (se edita desde la UI)", "client YAML config (edited from the UI)"))
     parser.add_argument("--out", type=Path, default=Path("data/out"))
     parser.add_argument("--reports", type=Path, default=Path("data/reports"))
     parser.add_argument("--maps", type=Path, default=Path("data/maps"))
-    parser.add_argument("--map", type=Path, help="mapa común del proyecto")
-    parser.add_argument("--repair", type=int, default=1, metavar="N", help="pasadas de autocorrección al generar")
+    parser.add_argument("--map", type=Path, help=tr("mapa común del proyecto", "shared project map"))
+    parser.add_argument("--repair", type=int, default=1, metavar="N", help=tr("pasadas de autocorrección al generar", "self-repair passes when generating"))
     args = parser.parse_args(argv)
     if not args.pdf.is_file():
-        parser.error(f"no existe {args.pdf}")
+        parser.error(tr("no existe {p}", "{p} does not exist", p=args.pdf))
     for folder, label in ((args.reports, "--reports"), (args.maps, "--maps")):
         if not inside_data(folder / "x"):
-            parser.error(f"{label} debe estar dentro de data/: contiene valores originales")
+            parser.error(tr("{label} debe estar dentro de data/: contiene valores originales", "{label} must be inside data/: it contains original values", label=label))
     if args.map is not None and not inside_data(args.map):
-        parser.error("--map debe estar dentro de data/")
+        parser.error(tr("--map debe estar dentro de data/", "--map must be inside data/"))
     if args.config.name in ("base.yaml", "example.yaml"):
-        parser.error("la UI edita la config: usa la de un cliente (configs/<cliente>.yaml), no base ni example")
+        parser.error(
+            tr(
+                "la UI edita la config: usa la de un cliente (configs/<cliente>.yaml), no base ni example",
+                "the UI edits the config: use a client one (configs/<client>.yaml), not base or example",
+            )
+        )
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    install_translations(app)
     window = ReviewWindow(args.pdf, args.config, args.out, args.reports, args.maps, args.map, args.repair)
     window.show()
     window.start()
