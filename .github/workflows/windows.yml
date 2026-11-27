@@ -45,23 +45,25 @@ jobs:
       - name: Autodiagnóstico de la app
         shell: pwsh
         run: |
-          $app = "dist\PID Anonymouse"
-          $env:PID_ANONYMOUSE_SELFTEST = "1"
-          $p = Start-Process -FilePath "$app\PID Anonymouse.exe" -Wait -PassThru
+          $app = "dist\GhostPID"
+          $env:GHOSTPID_SELFTEST = "1"
+          $p = Start-Process -FilePath "$app\GhostPID.exe" -Wait -PassThru
           Get-Content "$app\selftest.log"
           if ($p.ExitCode -ne 0) { throw "autodiagnóstico fallido ($($p.ExitCode))" }
           Remove-Item "$app\selftest.log", "$app\data", "$app\configs" -Recurse -Force
       - name: Empaquetar
         shell: pwsh
         run: |
-          Copy-Item scripts\LEEME-windows.txt "dist\PID Anonymouse\LEEME.txt"
-          Copy-Item docs\MANUAL.md "dist\PID Anonymouse\MANUAL.md"
-          $name = "PID-Anonymouse-windows-x64.zip"
-          Compress-Archive -Path "dist\PID Anonymouse" -DestinationPath $name
+          Copy-Item scripts\LEEME-windows.txt "dist\GhostPID\LEEME.txt"
+          Copy-Item docs\MANUAL.md "dist\GhostPID\MANUAL.md"
+          Copy-Item scripts\README-windows.txt "dist\GhostPID\README.txt"
+          Copy-Item docs\MANUAL.en.md "dist\GhostPID\MANUAL.en.md"
+          $name = "GhostPID-windows-x64.zip"
+          Compress-Archive -Path "dist\GhostPID" -DestinationPath $name
           "ZIP=$name" | Out-File -FilePath $env:GITHUB_ENV -Append
       - uses: actions/upload-artifact@v4
         with:
-          name: PID-Anonymouse-windows-x64
+          name: GhostPID-windows-x64
           path: ${{ env.ZIP }}
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')

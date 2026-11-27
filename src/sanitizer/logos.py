@@ -28,6 +28,8 @@ import pymupdf
 from PIL import Image
 from pydantic import ConfigDict
 
+from sanitizer.i18n import tr
+
 MIN_IMAGE_SIDE = 8  # px; por debajo no tiene sentido hablar de logo
 
 
@@ -132,11 +134,11 @@ def find_image_groups(doc: pymupdf.Document, policy: LogoPolicy) -> list[dict[st
             hamming(h, t) <= policy.hash_distance for h in group_hashes for t in targets
         )
         if near(keep):
-            decision, reason = False, "en logos.keep"
+            decision, reason = False, tr("en logos.keep", "in logos.keep")
         elif near(remove):
-            decision, reason = True, "en logos.remove"
+            decision, reason = True, tr("en logos.remove", "in logos.remove")
         elif policy.remove_repeated and len(pages) >= policy.min_pages and area <= policy.max_area:
-            decision, reason = True, f"repetida en {len(pages)} páginas"
+            decision, reason = True, tr("repetida en {n} páginas", "repeated on {n} pages", n=len(pages))
         else:
             decision, reason = False, ""
         out.append(

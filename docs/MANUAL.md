@@ -1,6 +1,6 @@
-# Manual de uso de PID Anonymouse
+# Manual de uso de GhostPID
 
-PID Anonymouse quita de los P&ID y PFD en PDF lo que identifica al cliente
+GhostPID quita de los P&ID y PFD en PDF lo que identifica al cliente
 antes de pasárselos a un LLM. Elimina empresas, operador, fabricantes,
 ubicación, códigos de proyecto, referencias a otros documentos, autores,
 logos, cajetines y metadatos. Conserva todo lo técnico: equipos, tags de
@@ -14,17 +14,23 @@ notas.
 - **El texto se borra de verdad:** no se tapa con un recuadro. Un LLM no
   puede recuperarlo ni leyendo la capa de texto ni "mirando" la imagen.
 
+> **Idioma.** La app y los comandos siguen el idioma del sistema operativo:
+> español si está en español (cualquier `es_*`) e inglés en cualquier otro
+> caso. Para forzar uno, define la variable de entorno
+> `GHOSTPID_LANG=es` o `GHOSTPID_LANG=en`. English manual:
+> [MANUAL.en.md](MANUAL.en.md).
+
 ---
 
 ## 1. Instalación
 
 ### Windows (descarga)
 
-1. Descarga `PID-Anonymouse-windows-x64.zip` desde la página de
-   [Releases](https://github.com/osbertodiaz/PID_Anonymouse/releases).
+1. Descarga `GhostPID-windows-x64.zip` desde la página de
+   [Releases](https://github.com/osbertodiaz/GhostPID/releases).
 2. Descomprímelo en una carpeta donde puedas escribir, por ejemplo
-   `Documentos\PID Anonymouse`. No lo ejecutes desde dentro del zip.
-3. Abre `PID Anonymouse.exe`. La app no está firmada, así que Windows
+   `Documentos\GhostPID`. No lo ejecutes desde dentro del zip.
+3. Abre `GhostPID.exe`. La app no está firmada, así que Windows
    SmartScreen puede avisar: pulsa **Más información** y después
    **Ejecutar de todas formas**.
 
@@ -37,13 +43,13 @@ Necesitas [uv](https://docs.astral.sh/uv/) y Tesseract:
 
 ```bash
 brew install uv tesseract tesseract-lang
-git clone https://github.com/osbertodiaz/PID_Anonymouse.git
-cd PID_Anonymouse
+git clone https://github.com/osbertodiaz/GhostPID.git
+cd GhostPID
 uv sync
 ./scripts/build_app.sh
 ```
 
-La app queda en `dist/PID Anonymouse.app`. Ábrela desde ahí: trabaja con las
+La app queda en `dist/GhostPID.app`. Ábrela desde ahí: trabaja con las
 carpetas `data/` y `configs/` del proyecto, así que no la muevas a
 Aplicaciones.
 
@@ -164,6 +170,15 @@ Según el tipo:
 
 Los términos se buscan como palabras completas, sin distinguir mayúsculas,
 y admiten espacios o saltos de línea entre palabras.
+
+**La lista negra de la industria.** Las reglas `kb-epc`, `kb-licensor`,
+`kb-manufacturer` y `kb-operator` (marcadas *lista negra (CSV)* en el
+desplegable) vienen de `configs/blacklist/industria.csv`, una base de datos con
+más de mil ingenierías, licenciantes, fabricantes y operadores. Si eliges una
+de ellas al añadir un término, el nombre se guarda como fila nueva en
+`configs/blacklist/propia.csv` y servirá para todos los clientes. Descartar
+una detección de la lista negra la convierte en excepción solo para este
+cliente. El CSV se puede abrir y ampliar en Excel (ver la sección 5).
 
 ### 3.5 Dibujar zonas
 
@@ -294,6 +309,16 @@ Puntos clave:
   `disable: [id]`.
 - **Comprobar una config** desde la línea de comandos:
   `uv run validate-config configs/<cliente>.yaml --check "texto de prueba"`.
+- **Lista negra de la industria:** `configs/blacklist/*.csv`, una fila por
+  empresa con las columnas `name` (nombre principal), `aliases` (otras formas
+  separadas por `|`), `category` (`epc`, `licensor`, `manufacturer`,
+  `operator`, o en español `ingenieria`, `licenciante`, `fabricante`,
+  `operador`), `segment`, `industries` (`oil_gas`, `chemicals`, `gases`,
+  `pharma`, `power`, `general`), `country`, `active` (`no` la desactiva) y
+  `notes`. Al guardar, la herramienta rechaza nombres de menos de 3
+  caracteres, palabras de P&ID ("Shell", "Total", "Crane") y nombres
+  repetidos, indicando el fichero y la línea. Para un cliente concreto:
+  `blacklist: {industries: [pharma], exclude: [Vega]}` en su YAML.
 
 ---
 
@@ -345,6 +370,7 @@ varias ubicaciones. `revert` solo está disponible desde la línea de comandos.
 | "Cambio rechazado" al añadir algo | El cambio dejaría la config inválida (p. ej. un término que es a la vez excepción). Lee el mensaje; la config no se ha tocado |
 | El proceso es lento | Es normal con muchas páginas escaneadas: el OCR se repite para no dejar restos. Mientras ajustas reglas, usa **Recalcular** (sin OCR) |
 | Quiero deshacer el último cambio de la config | Copia `configs/<cliente>.yaml.bak` sobre `configs/<cliente>.yaml` |
+| La app sale en otro idioma | Define `GHOSTPID_LANG=es` (o `en`) antes de abrirla |
 
 ---
 

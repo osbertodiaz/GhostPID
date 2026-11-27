@@ -35,22 +35,45 @@ from typing import Any, Callable
 
 import pymupdf
 
-from sanitizer.audit import audit
+from sanitizer.audit import audit, display
 from sanitizer.config_edit import ConfigEditor
 from sanitizer.mapping import inside_data, load_map
 from sanitizer.pipeline import anonymize
+from sanitizer.i18n import is_spanish, tr
 
-# Tipo → descripción corta (también es el orden de la leyenda)
-KINDS: dict[str, str] = {
-    "sustitución": "texto sustituido",
-    "zona": "zona eliminada",
-    "logo": "imagen eliminada",
-    "resto": "resto encontrado por la auditoría",
-    "aviso": "aviso de la auditoría",
-    "rozada": "coincidencia rozada (revisa la regla)",
-    "bloqueada": "bloqueada por la lista blanca",
-    "revisar": "texto restante para revisar",
+# Tipo (código interno, estable) → (nombre en inglés, descripción en español,
+# descripción en inglés). También es el orden de la leyenda.
+KINDS: dict[str, tuple[str, str, str]] = {
+    "sustitución": ("substitution", "texto sustituido", "replaced text"),
+    "zona": ("zone", "zona eliminada", "removed zone"),
+    "logo": ("logo", "imagen eliminada", "removed image"),
+    "resto": ("leftover", "resto encontrado por la auditoría", "leftover found by the audit"),
+    "aviso": ("warning", "aviso de la auditoría", "audit warning"),
+    "rozada": ("near miss", "coincidencia rozada (revisa la regla)", "near miss (check the rule)"),
+    "bloqueada": ("blocked", "bloqueada por la lista blanca", "blocked by the whitelist"),
+    "revisar": ("review", "texto restante para revisar", "remaining text to review"),
 }
+
+# Origen de un ReviewState (código interno) → nombre en inglés
+_ORIGINS = {
+    "informes": "reports",
+    "vista previa": "preview",
+    "vista previa con OCR": "preview with OCR",
+    "generado": "generated",
+}
+
+
+def kind_name(kind: str) -> str:
+    """Nombre del tipo de detección en el idioma actual."""
+    return kind if is_spanish() else KINDS[kind][0]
+
+
+def kind_description(kind: str) -> str:
+    return tr(KINDS[kind][1], KINDS[kind][2])
+
+
+def origin_name(origin: str) -> str:
+    return origin if is_spanish() else _ORIGINS.get(origin, origin)
 
 Rect = tuple[float, float, float, float]
 
@@ -101,12 +124,12 @@ def collect_detections(
 ) -> list[Detection]:
     out: list[Detection] = []
     for r in report.get("replacements", []):
-        detail = r["replacement"] or "(eliminado)"
+        detail = r["replacement"] or tr("(eliminado)", "(removed)")
         if r.get("source", "page") != "page":
             detail += f" · {r['source']}"
         out.append(Detection("sustitución", r["page"], r["original"], detail, r["rule"], [tuple(x) for x in r.get("rects", [])]))
     for z in report.get("zones", []):
-        out.append(Detection("zona", z["page"], z["zone"], "zona de la config", z["zone"], [tuple(z["rect"])]))
+        out.append(Detection("zona", z["page"], z["zone"], tr("zona de la config", "config zone"), z["zone"], [tuple(z["rect"])]))
     for g in report.get("logos", []):
         if not g.get("removed"):
             continue
@@ -119,20 +142,20 @@ def collect_detections(
                     except (RuntimeError, ValueError):
                         pass
             size = "×".join(map(str, g["size"]))
-            out.append(Detection("logo", page, f"imagen {size}", g.get("reason", ""), g["hash"], rects))
+            out.append(Detection("logo", page, tr("imagen {s}", "image {s}", s=size), g.get("reason", ""), g["hash"], rects))
     for b in report.get("near_misses", []):
         out.append(Detection("rozada", b["page"], b["text"], b["protected_by"], b["rule"]))
     for b in report.get("blocked", []):
-        out.append(Detection("bloqueada", b["page"], b["text"], f"protegido por '{b['protected_by']}'", b["rule"]))
+        out.append(Detection("bloqueada", b["page"], b["text"], tr("protegido por '{w}'", "protected by '{w}'", w=b["protected_by"]), b["rule"]))
     if audit_data:
         for f in audit_data.get("findings", []):
             kind = "resto" if f["severity"] == "error" else "aviso"
             rects = [tuple(f["rect"])] if f.get("rect") else []
-            detail = f"{f['check']} · {f['where']}"
+            detail = f"{display(f['check'])} · {f['where']}"
             out.append(Detection(kind, f.get("page") or 0, f["text"], detail, _audit_rule(f["where"]), rects))
         for line in audit_data.get("review_lines", []):
             pages = list(line.get("páginas", []))
-            origin = ", ".join(line.get("origen", []))
+            origin = ", ".join(display(o) for o in line.get("origen", []))
             out.append(Detection("revisar", pages[0] if len(pages) == 1 else 0, line["texto"], origin, "", [], pages))
     return out
 
@@ -196,7 +219,12 @@ def preview(
     say = progress or (lambda _msg: None)
     workdir = reports_dir / src.stem / "revision"
     if not inside_data(workdir / "x"):
-        raise ValueError("la carpeta de informes debe estar dentro de data/: contiene valores originales")
+        raise ValueError(
+            tr(
+                "la carpeta de informes debe estar dentro de data/: contiene valores originales",
+                "the reports folder must be inside data/: it contains original values",
+            )
+        )
     workdir.mkdir(parents=True, exist_ok=True)
     run_config = config if ocr else _without_ocr(config)
     # Copia del mapa: misma numeración que el resultado, sin tocar el real
@@ -207,9 +235,9 @@ def preview(
     else:
         map_copy.unlink(missing_ok=True)
     output = workdir / "vista.pdf"
-    say("Anonimizando" + (" con OCR" if ocr else " (sin OCR)") + "…")
+    say(tr("Anonimizando con OCR…", "Anonymizing with OCR…") if ocr else tr("Anonimizando (sin OCR)…", "Anonymizing (no OCR)…"))
     report = json.loads(anonymize(src, output, run_config, map_copy).to_json())
-    say("Auditando…")
+    say(tr("Auditando…", "Auditing…"))
     result = audit(output, run_config, workdir, src, report, load_map(map_copy), write=False)
     audit_data = json.loads(json.dumps(_audit_dict(result), default=str))
     with pymupdf.open(src) as doc:
@@ -254,13 +282,13 @@ def generate(
 def discard_action(d: Detection) -> str | None:
     """Qué cambio en la config descarta la detección (None si no se puede)."""
     if d.kind == "sustitución" and d.rule:
-        return f"excepción '{d.text}' en la regla '{d.rule}'"
+        return tr("excepción '{t}' en la regla '{r}'", "exception '{t}' in rule '{r}'", t=d.text, r=d.rule)
     if d.kind in ("resto", "aviso") and d.rule:
-        return f"excepción '{d.text}' en la regla '{d.rule}'"
+        return tr("excepción '{t}' en la regla '{r}'", "exception '{t}' in rule '{r}'", t=d.text, r=d.rule)
     if d.kind == "logo":
-        return f"conservar siempre la imagen {d.rule} (logos.keep)"
+        return tr("conservar siempre la imagen {r} (logos.keep)", "always keep image {r} (logos.keep)", r=d.rule)
     if d.kind == "zona":
-        return f"desactivar la zona '{d.rule}' (disable)"
+        return tr("desactivar la zona '{r}' (disable)", "disable zone '{r}' (disable)", r=d.rule)
     return None
 
 
@@ -268,7 +296,7 @@ def discard(editor: ConfigEditor, d: Detection) -> str:
     """Aplica el descarte en la config; devuelve la descripción del cambio."""
     action = discard_action(d)
     if action is None:
-        raise ValueError(f"esta detección no se puede descartar ({d.kind})")
+        raise ValueError(tr("esta detección no se puede descartar ({k})", "this detection cannot be discarded ({k})", k=kind_name(d.kind)))
     if d.kind in ("sustitución", "resto", "aviso"):
         editor.add_exception(d.rule, d.text)
     elif d.kind == "logo":

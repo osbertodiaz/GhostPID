@@ -1,8 +1,8 @@
 """Construye la app de escritorio de la UI de revisión con PyInstaller.
 
-- macOS: `dist/PID Anonymouse.app`. Trabaja con `data/` y `configs/` del
+- macOS: `dist/GhostPID.app`. Trabaja con `data/` y `configs/` del
   proyecto, así que debe quedarse en `<proyecto>/dist/`.
-- Windows: `dist/PID Anonymouse/` (carpeta con el .exe). Con `--tesseract
+- Windows: `dist/GhostPID/` (carpeta con el .exe). Con `--tesseract
   <carpeta>` se copia dentro tesseract con los idiomas eng, spa y osd, para
   una descarga que no necesita instalar nada más.
 
@@ -20,7 +20,7 @@ from pathlib import Path
 import PyInstaller.__main__
 
 ROOT = Path(__file__).resolve().parents[1]
-NAME = "PID Anonymouse"
+NAME = "GhostPID"
 LANGUAGES = ("eng", "spa", "osd")
 
 
@@ -46,6 +46,8 @@ def build() -> Path:
         f"{ROOT / 'configs' / 'base.yaml'}{sep}configs",
         "--add-data",
         f"{ROOT / 'configs' / 'example.yaml'}{sep}configs",
+        "--add-data",
+        f"{ROOT / 'configs' / 'blacklist' / 'industria.csv'}{sep}configs/blacklist",
         "--exclude-module",
         "cv2",
         "--exclude-module",
@@ -54,7 +56,7 @@ def build() -> Path:
         "tkinter",
     ]
     if sys.platform == "darwin":
-        args += ["--osx-bundle-identifier", "local.pid-anonymouse.review"]
+        args += ["--osx-bundle-identifier", "local.ghostpid.review"]
     PyInstaller.__main__.run([*args, str(ROOT / "scripts" / "app_entry.py")])
     if sys.platform == "darwin":
         shutil.rmtree(ROOT / "dist" / NAME, ignore_errors=True)  # carpeta intermedia; la app es el .app

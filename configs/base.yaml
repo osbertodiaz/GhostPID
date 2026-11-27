@@ -71,3 +71,17 @@ whitelist:
 substitutions: []
 
 zones: []
+
+# Lista negra de la industria: ingenierías EPC, licenciantes, fabricantes y
+# operadores que se buscan siempre (configs/blacklist/*.csv). Se convierten
+# en las sustituciones kb-epc, kb-licensor, kb-manufacturer y kb-operator
+# (EPC-n, LICENSOR-n, VENDOR-n, OPR-n). Solo palabras completas: "Linde" no
+# encaja en "CYLINDER". Consultar y ampliar: `uv run blacklist stats|find|add`.
+# En la config del cliente se puede afinar sin tocar el CSV:
+#   blacklist:
+#     industries: [pharma]       # solo estas industrias (vacío = todas)
+#     exclude: [Vega]            # términos que no se buscan en este set
+#     enabled: false             # desactivarla
+blacklist:
+  files: [blacklist/*.csv]
+  user_file: blacklist/propia.csv

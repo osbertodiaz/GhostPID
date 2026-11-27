@@ -54,6 +54,7 @@ from pydantic import ConfigDict
 
 from sanitizer.inventory import DetectionParams, image_coverage, text_visibility
 from sanitizer.lineart import remove_paths
+from sanitizer.i18n import tr
 
 # Texto con coordenadas: se conservan espacios y ligaduras, y no se recorta al
 # MediaBox (el texto fuera de la página no se ve, pero se extrae igual)
@@ -208,6 +209,8 @@ class Namer:
             template = entry["template"]
             for original in entry["originals"]:
                 namer._values[(template, normalize(original))] = value
+            if entry.get("entity"):
+                namer._values[(template, ENTITY_KEY + normalize(entry["entity"]))] = value
             if entry.get("n"):
                 namer._counters[template] = max(namer._counters.get(template, 0), entry["n"])
             namer.entries[value] = {
@@ -222,16 +225,22 @@ class Namer:
 
     def name(self, template: str, original: str, rule: Any = None, exact: bool = True) -> str:
         """Denominación para `original`. `exact`: leído del texto real (no OCR)."""
-        key = (template, normalize(original))
+        keys = [(template, normalize(original))]
+        # Lista negra: todos los alias de una entidad comparten denominación
+        entity = rule.entity_of(original) if rule is not None and getattr(rule, "entities", None) else None
+        if entity:
+            keys.append((template, ENTITY_KEY + normalize(entity)))
+        value = next((self._values[k] for k in keys if k in self._values), None)
         n = None
-        if key not in self._values:
+        if value is None:
             if "{n}" in template:
                 n = self._counters.get(template, 0) + 1
                 self._counters[template] = n
-                self._values[key] = template.format(n=n)
+                value = template.format(n=n)
             else:
-                self._values[key] = template
-        value = self._values[key]
+                value = template
+        for k in keys:
+            self._values.setdefault(k, value)
         originals = self.mapping.setdefault(value, [])
         if original not in originals:
             originals.append(original)
@@ -242,11 +251,17 @@ class Namer:
         if rule is not None and entry["rule"] is None:
             entry["rule"] = rule.id
             entry["category"] = rule.category.value
+        if entity:
+            entry.setdefault("entity", entity)
         # Los saltos de línea y espacios del plano no distinguen originales
         stats = entry["originals"].setdefault(" ".join(original.split()), {"count": 0, "exact": 0})
         stats["count"] += 1
         stats["exact"] += int(exact)
         return value
+
+
+# Prefijo de las claves de entidad del Namer (no colisiona con un original)
+ENTITY_KEY = "\x00entity:"
 
 
 def normalize(text: str) -> str:
@@ -288,16 +303,12 @@ def find_matches(
     protected = [(m.start(), m.end(), wl.id) for wl in config.whitelist for m in wl.regex.finditer(text)]
     protected += list(extra_protected)
 
-    from sanitizer.rules import term_regex  # rules importa este módulo
-
     normalized = ocr_normalize(text) if fuzzy else None
     candidates = []
     for order, rule in enumerate(config.substitutions):
         if fuzzy:
-            searches = [
-                (re.compile(term_regex(ocr_normalize(t), word_boundaries=not relaxed)), normalized)
-                for t in rule.terms
-            ] + [(rx, text) for rx in rule.pattern_regexes]
+            searches = [(rx, normalized) for rx in rule.ocr_term_matchers(relaxed)]
+            searches += [(rx, text) for rx in rule.pattern_regexes]
         else:
             searches = [(rx, text) for rx in (rule.relaxed_matchers if relaxed else rule.matchers)]
         for rx, haystack in searches:
@@ -330,6 +341,8 @@ def near_misses(config: Any, text: str, accepted: list[Match]) -> list[tuple[str
 
     out = []
     for rule in config.substitutions:
+        if rule.word_only:
+            continue  # lista negra: solo palabras completas, nada de rozadas
         flags = 0 if rule.case_sensitive else re.IGNORECASE
         raw = [term_regex(t, word_boundaries=False) for t in rule.terms]
         # Términos de varias palabras que aparecen solo en parte (p. ej. un logo
@@ -519,7 +532,7 @@ def _plan_page(
         for context, rule in near_misses(config, text, matches):
             if (page.number + 1, context) not in seen:
                 seen.add((page.number + 1, context))
-                report.near_misses.append(Blocked(page.number + 1, "page", rule.id, context, "límite de token"))
+                report.near_misses.append(Blocked(page.number + 1, "page", rule.id, context, tr("límite de token", "token boundary")))
         for m in matches:
             original = text[m.start : m.end]
             value = namer.name(m.rule.replacement, original, m.rule)
@@ -878,8 +891,13 @@ class Session:
                     result = remove_paths(pdf, number, areas, touched)
                     if result.xobject_paths:
                         self.report.warnings.append(
-                            f"página {number + 1}: hay trazos dentro de Form XObjects que no se "
-                            f"han revisado (revisa visualmente el resultado)"
+                            tr(
+                                "página {n}: hay trazos dentro de Form XObjects que no se "
+                                "han revisado (revisa visualmente el resultado)",
+                                "page {n}: there are paths inside Form XObjects that were not "
+                                "checked (review the result visually)",
+                                n=number + 1,
+                            )
                         )
             buf = io.BytesIO()
             pdf.save(buf)
@@ -896,7 +914,7 @@ class Session:
     def save(self, dst: str | Path) -> None:
         dst = Path(dst)
         if self.src.resolve() == dst.resolve():
-            raise ValueError("la salida no puede sobrescribir el PDF original")
+            raise ValueError(tr("la salida no puede sobrescribir el PDF original", "the output cannot overwrite the original PDF"))
         self.restore_layers()
         self.flush_line_art()
         self._restore_lossy_images()
@@ -956,7 +974,9 @@ class Session:
                     lost -= collections.Counter(self._protected_in(number, excluded))
                 if lost:
                     items = ", ".join(f"'{k}'" + (f" ×{v}" if v > 1 else "") for k, v in lost.items())
-                    self.report.warnings.append(f"página {number}: se han perdido datos protegidos: {items}")
+                    self.report.warnings.append(
+                        tr("página {n}: se han perdido datos protegidos: {items}", "page {n}: protected data was lost: {items}", n=number, items=items)
+                    )
 
     def _protected_in(self, number: int, rects: list[pymupdf.Rect]) -> list[str]:
         """Datos protegidos del original que caían dentro de `rects`."""
@@ -981,7 +1001,7 @@ def redact_pdf(
 ) -> RedactionReport:
     """Fase 4 sola: redacta el texto de `src` y guarda el resultado en `dst`."""
     if Path(src).resolve() == Path(dst).resolve():
-        raise ValueError("la salida no puede sobrescribir el PDF original")
+        raise ValueError(tr("la salida no puede sobrescribir el PDF original", "the output cannot overwrite the original PDF"))
     with Session(src, config, policy, detection) as session:
         session.snapshot()
         session.redact_text()
@@ -1019,14 +1039,26 @@ def verify_redaction(
                 relaxed = policy.ocr_relaxed_terms and page_mode(page, detection or config.detection) == "scanned"
                 for text, chars in _blocks(page):
                     for m in find_matches(config, text, _protected_chars(chars, stacked), relaxed)[0]:
-                        problems.append(f"página {number}: queda '{text[m.start:m.end]}' (regla '{m.rule.id}')")
+                        problems.append(
+                            tr(
+                                "página {n}: queda '{t}' (regla '{r}')",
+                                "page {n}: '{t}' remains (rule '{r}')",
+                                n=number, t=text[m.start : m.end], r=m.rule.id,
+                            )
+                        )
         for page in doc:
             number = page.number + 1
-            texts = [(a.info.get("content") or "", "anotación") for a in page.annots()]
-            texts += [(w.field_value, "formulario") for w in page.widgets() if isinstance(w.field_value, str)]
+            texts = [(a.info.get("content") or "", tr("anotación", "annotation")) for a in page.annots()]
+            texts += [(w.field_value, tr("formulario", "form")) for w in page.widgets() if isinstance(w.field_value, str)]
             for value, where in texts:
                 for m in find_matches(config, value)[0]:
-                    problems.append(f"página {number} ({where}): queda '{value[m.start:m.end]}' (regla '{m.rule.id}')")
+                    problems.append(
+                        tr(
+                            "página {n} ({where}): queda '{t}' (regla '{r}')",
+                            "page {n} ({where}): '{t}' remains (rule '{r}')",
+                            n=number, where=where, t=value[m.start : m.end], r=m.rule.id,
+                        )
+                    )
     return problems
 
 
@@ -1038,15 +1070,18 @@ def verify_redaction(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="redact",
-        description="Redacta el texto de un PDF según las reglas de una config YAML.",
+        description=tr("Redacta el texto de un PDF según las reglas de una config YAML.", "Redacts the text of a PDF according to the rules of a YAML config."),
     )
-    parser.add_argument("pdf", type=Path, help="PDF de entrada")
-    parser.add_argument("-o", "--output", type=Path, required=True, help="PDF de salida")
-    parser.add_argument("--config", type=Path, required=True, help="config YAML del cliente")
+    parser.add_argument("pdf", type=Path, help=tr("PDF de entrada", "input PDF"))
+    parser.add_argument("-o", "--output", type=Path, required=True, help=tr("PDF de salida", "output PDF"))
+    parser.add_argument("--config", type=Path, required=True, help=tr("config YAML del cliente", "client YAML config"))
     parser.add_argument(
         "--report",
         type=Path,
-        help="JSON con cada sustitución (contiene los valores originales: guárdalo en data/)",
+        help=tr(
+            "JSON con cada sustitución (contiene los valores originales: guárdalo en data/)",
+            "JSON with every substitution (contains the original values: keep it in data/)",
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -1055,7 +1090,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config)
     except ConfigError as exc:
-        parser.error(f"config inválida: {exc}")
+        parser.error(tr("config inválida: {exc}", "invalid config: {exc}", exc=exc))
 
     try:
         report = redact_pdf(args.pdf, args.output, config)
@@ -1063,33 +1098,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    modes: dict[str, int] = {}
-    for mode in report.page_modes.values():
-        modes[mode] = modes.get(mode, 0) + 1
+    from sanitizer.pipeline import print_summary  # pipeline importa este módulo
+
     print(f"{args.pdf} → {args.output}")
-    print(f"  páginas por tipo: {modes} · tags apilados protegidos: {report.stacked_tags}")
-    counts = report.counts()
-    print("  sustituciones: " + (", ".join(f"{k} ×{v}" for k, v in counts.items()) or "ninguna"))
-    for w in report.warnings:
-        print(f"  aviso: {w}")
-    if report.near_misses:
-        print(f"  coincidencias rozadas (revisa las reglas): {len(report.near_misses)}")
-        for n in report.near_misses[:10]:
-            print(f"    pág {n.page}: …{n.text}… ('{n.rule}')")
-    for b in report.blocked:
-        print(f"  BLOQUEADA (pág {b.page}, {b.source}): '{b.text}' de '{b.rule}' toca '{b.protected_by}'")
+    print_summary(report)
     if args.report:
         if "data" not in args.report.resolve().parts:
-            print(f"AVISO: {args.report} está fuera de data/ y contiene valores originales.", file=sys.stderr)
+            print(tr("AVISO: {r} está fuera de data/ y contiene valores originales.", "WARNING: {r} is outside data/ and contains original values.", r=args.report), file=sys.stderr)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(report.to_json(), encoding="utf-8")
-        print(f"  informe: {args.report}")
+        print(tr("  informe: {r}", "  report: {r}", r=args.report))
     if report.problems:
-        print("VERIFICACIÓN FALLIDA:", file=sys.stderr)
+        print(tr("VERIFICACIÓN FALLIDA:", "VERIFICATION FAILED:"), file=sys.stderr)
         for p in report.problems:
             print(f"  - {p}", file=sys.stderr)
         return 1
-    print("  verificación (relectura del texto): OK")
+    print(tr("  verificación (relectura del texto): OK", "  verification (text re-read): OK"))
     return 0
 
 

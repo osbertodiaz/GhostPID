@@ -17,6 +17,8 @@ Una config tiene cuatro bloques:
 - `logos`: imágenes repetidas que se eliminan, y hashes fijados a mano.
 - `ocr`: OCR del texto en trazos y de los escaneados.
 - `audit`: comprobaciones finales (OCR de la auditoría, franjas de revisión).
+- `blacklist`: lista negra de la industria (CSV de empresas, ver
+  `sanitizer.blacklist`); se convierte en sustituciones `kb-<categoría>`.
 
 Las configs pueden heredar de otra con `extends` (ruta relativa al fichero).
 Al heredar:
@@ -43,7 +45,7 @@ import string
 import sys
 from dataclasses import dataclass
 from enum import Enum
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -51,11 +53,14 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from sanitizer.audit import AuditPolicy
+from sanitizer.blacklist import RULE_PREFIX as KB_PREFIX
+from sanitizer.blacklist import BlacklistError, BlacklistPolicy, build_rules, entity_key, is_acronym, resolve_paths
 from sanitizer.inventory import DetectionParams
 from sanitizer.metadata import MetadataPolicy
 from sanitizer.logos import LogoPolicy
 from sanitizer.ocr import OcrPolicy
-from sanitizer.redact import RedactionPolicy
+from sanitizer.redact import RedactionPolicy, ocr_normalize
+from sanitizer.i18n import tr
 
 SCHEMA_VERSION = 1
 
@@ -97,7 +102,7 @@ def _check_regex(pattern: str, label: str) -> None:
     try:
         re.compile(pattern)
     except re.error as exc:
-        raise ValueError(f"regex inválida en {label} ({pattern!r}): {exc}") from None
+        raise ValueError(tr("regex inválida en {label} ({pattern}): {exc}", "invalid regex in {label} ({pattern}): {exc}", label=label, pattern=repr(pattern), exc=exc)) from None
 
 
 def _wrap(pattern: str, boundary: str, exceptions: list[str] | None = None) -> str:
@@ -151,14 +156,14 @@ class WhitelistRule(_Strict):
         _check_regex(self.pattern, "pattern")
         for exc in self.exceptions:
             _check_regex(exc, "exceptions")
-        _check_regex(self.effective_pattern, "pattern (con límites y excepciones)")
+        _check_regex(self.effective_pattern, tr("pattern (con límites y excepciones)", "pattern (with boundaries and exceptions)"))
         rx = self.regex
         bad = [e for e in self.examples if not rx.fullmatch(e)]
         if bad:
-            raise ValueError(f"estos ejemplos no encajan enteros con el patrón: {bad}")
+            raise ValueError(tr("estos ejemplos no encajan enteros con el patrón: {bad}", "these examples do not fully match the pattern: {bad}", bad=bad))
         wrong = [e for e in self.counter_examples if rx.search(e)]
         if wrong:
-            raise ValueError(f"estos contraejemplos encajan con el patrón y no deberían: {wrong}")
+            raise ValueError(tr("estos contraejemplos encajan con el patrón y no deberían: {wrong}", "these counter-examples match the pattern and should not: {wrong}", wrong=wrong))
         return self
 
     @property
@@ -207,13 +212,20 @@ class SubstitutionRule(_Strict):
     # positivos descartados al revisar). Comparación del texto entero, con
     # espacios flexibles y sin distinguir mayúsculas salvo `case_sensitive`.
     exceptions: list[str] = Field(default_factory=list)
+    # Reglas de la lista negra (CSV): término (clave `entity_key`) → entidad,
+    # para que los alias de una empresa compartan denominación (VENDOR-3)
+    entities: dict[str, str] = Field(default_factory=dict)
+    # Términos solo como palabras completas, también en OCR y en la auditoría
+    # ("LINDE" no debe encajar dentro de "CYLINDER"). Se buscan con una sola
+    # regex combinada: la lista negra tiene miles de términos.
+    word_only: bool = False
 
     @field_validator("terms", "exceptions")
     @classmethod
     def _clean_terms(cls, terms: list[str]) -> list[str]:
         cleaned = [t.strip() for t in terms]
         if any(not t for t in cleaned):
-            raise ValueError("hay términos vacíos")
+            raise ValueError(tr("hay términos vacíos", "there are empty terms"))
         return cleaned
 
     @field_validator("replacement")
@@ -222,29 +234,29 @@ class SubstitutionRule(_Strict):
         try:
             fields = {f for _, f, _, _ in string.Formatter().parse(value) if f is not None}
         except ValueError as exc:
-            raise ValueError(f"replacement mal formado: {exc}") from None
+            raise ValueError(tr("replacement mal formado: {exc}", "malformed replacement: {exc}", exc=exc)) from None
         if fields - {"n"}:
-            raise ValueError(f"replacement solo admite {{n}}, no {sorted(fields - {'n'})}")
+            raise ValueError(tr("replacement solo admite {{n}}, no {bad}", "replacement only accepts {{n}}, not {bad}", bad=sorted(fields - {"n"})))
         return value
 
     @model_validator(mode="after")
     def _validate(self) -> SubstitutionRule:
         if not self.terms and not self.patterns:
-            raise ValueError("hace falta al menos un término (terms) o un patrón (patterns)")
+            raise ValueError(tr("hace falta al menos un término (terms) o un patrón (patterns)", "at least one term (terms) or pattern (patterns) is required"))
         for p in self.patterns:
             _check_regex(p, "patterns")
         if self.patterns:
             if not self.examples:
-                raise ValueError("los patrones necesitan ejemplos (examples)")
+                raise ValueError(tr("los patrones necesitan ejemplos (examples)", "patterns need examples (examples)"))
             unused = [p for p, rx in zip(self.patterns, self.pattern_regexes) if not any(rx.fullmatch(e) for e in self.examples)]
             if unused:
-                raise ValueError(f"estos patrones no encajan con ningún ejemplo: {unused}")
+                raise ValueError(tr("estos patrones no encajan con ningún ejemplo: {unused}", "these patterns match no example: {unused}", unused=unused))
             orphan = [e for e in self.examples if not any(rx.fullmatch(e) for rx in self.pattern_regexes)]
             if orphan:
-                raise ValueError(f"estos ejemplos no encajan enteros con ningún patrón: {orphan}")
+                raise ValueError(tr("estos ejemplos no encajan enteros con ningún patrón: {orphan}", "these examples do not fully match any pattern: {orphan}", orphan=orphan))
         contradictions = [s for s in self.samples if self.excepted(s)]
         if contradictions:
-            raise ValueError(f"estos términos o ejemplos figuran también en exceptions: {contradictions}")
+            raise ValueError(tr("estos términos o ejemplos figuran también en exceptions: {items}", "these terms or examples are also listed in exceptions: {items}", items=contradictions))
         return self
 
     def excepted(self, text: str) -> bool:
@@ -265,18 +277,49 @@ class SubstitutionRule(_Strict):
     def pattern_regexes(self) -> list[re.Pattern[str]]:
         return [_compile(_wrap(p, self.boundary), self._flags) for p in self.patterns]
 
+    def entity_of(self, text: str) -> str | None:
+        """Entidad de la lista negra a la que pertenece `text`, si la hay."""
+        return self.entities.get(entity_key(text)) if self.entities else None
+
+    @cached_property
+    def _combined(self) -> re.Pattern[str]:
+        """Una regex con todos los términos (más largos primero), palabra
+        completa. Las siglas en mayúsculas distinguen mayúsculas."""
+        parts = []
+        for t in sorted(self.terms, key=len, reverse=True):
+            body = r"\s+".join(re.escape(w) for w in t.split())
+            parts.append(f"(?-i:{body})" if is_acronym(t) and not self.case_sensitive else body)
+        return re.compile(rf"(?<!\w)(?:{'|'.join(parts)})(?!\w)", self._flags)
+
+    @cached_property
+    def _combined_ocr(self) -> re.Pattern[str]:
+        """Como `_combined`, sobre texto pasado por `ocr_normalize`."""
+        words = {r"\s+".join(re.escape(w) for w in ocr_normalize(t).split()) for t in self.terms}
+        alts = sorted(words, key=len, reverse=True)
+        return re.compile(rf"(?<!\w)(?:{'|'.join(alts)})(?!\w)")
+
     @property
     def matchers(self) -> list[re.Pattern[str]]:
         """Regex de términos y patrones, en ese orden."""
+        if self.word_only:
+            return ([self._combined] if self.terms else []) + self.pattern_regexes
         terms = [_compile(term_regex(t), self._flags) for t in self.terms]
         return terms + self.pattern_regexes
 
     @property
     def relaxed_matchers(self) -> list[re.Pattern[str]]:
         """Como `matchers`, pero los términos encajan también dentro de otras
-        palabras (capas OCR con palabras pegadas)."""
+        palabras (capas OCR con palabras pegadas). No en reglas `word_only`."""
+        if self.word_only:
+            return self.matchers
         terms = [_compile(term_regex(t, word_boundaries=False), self._flags) for t in self.terms]
         return terms + self.pattern_regexes
+
+    def ocr_term_matchers(self, relaxed: bool = False) -> list[re.Pattern[str]]:
+        """Regex de los términos para texto pasado por `ocr_normalize`."""
+        if self.word_only:
+            return [self._combined_ocr] if self.terms else []
+        return [_compile(term_regex(ocr_normalize(t), word_boundaries=not relaxed), 0) for t in self.terms]
 
     @property
     def samples(self) -> list[str]:
@@ -313,22 +356,22 @@ class Zone(_Strict):
     def _validate(self) -> Zone:
         x0, y0, x1, y1 = self.rect
         if not (x0 < x1 and y0 < y1):
-            raise ValueError(f"rect debe ser [x0, y0, x1, y1] con x0 < x1 e y0 < y1: {list(self.rect)}")
+            raise ValueError(tr("rect debe ser [x0, y0, x1, y1] con x0 < x1 e y0 < y1: {rect}", "rect must be [x0, y0, x1, y1] with x0 < x1 and y0 < y1: {rect}", rect=list(self.rect)))
         if min(self.rect) < 0:
-            raise ValueError(f"rect no admite valores negativos: {list(self.rect)}")
+            raise ValueError(tr("rect no admite valores negativos: {rect}", "rect does not accept negative values: {rect}", rect=list(self.rect)))
         if self.unit == "fraction" and max(self.rect) > 1:
-            raise ValueError(f"con unit: fraction, rect va de 0 a 1: {list(self.rect)}")
+            raise ValueError(tr("con unit: fraction, rect va de 0 a 1: {rect}", "with unit: fraction, rect goes from 0 to 1: {rect}", rect=list(self.rect)))
         if self.pages != "all":
             if not self.pages:
-                raise ValueError("pages vacío: usa 'all' o una lista de páginas")
+                raise ValueError(tr("pages vacío: usa 'all' o una lista de páginas", "empty pages: use 'all' or a list of pages"))
             for item in self.pages:
                 if isinstance(item, int):
                     if item == 0:
-                        raise ValueError("las páginas empiezan en 1 (o -1 para la última)")
+                        raise ValueError(tr("las páginas empiezan en 1 (o -1 para la última)", "pages start at 1 (or -1 for the last one)"))
                 else:
                     m = _PAGE_RANGE.match(item)
                     if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
-                        raise ValueError(f"rango de páginas inválido: {item!r} (usa p. ej. '3-7')")
+                        raise ValueError(tr("rango de páginas inválido: {item} (usa p. ej. '3-7')", "invalid page range: {item} (use e.g. '3-7')", item=repr(item)))
         return self
 
     def page_numbers(self, page_count: int) -> set[int]:
@@ -387,6 +430,7 @@ class Config(_Strict):
     logos: LogoPolicy = Field(default_factory=LogoPolicy)
     ocr: OcrPolicy = Field(default_factory=OcrPolicy)
     audit: AuditPolicy = Field(default_factory=AuditPolicy)
+    blacklist: BlacklistPolicy = Field(default_factory=BlacklistPolicy)
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Config:
@@ -394,7 +438,7 @@ class Config(_Strict):
             ids = [r.id for r in getattr(self, block)]
             dup = sorted({i for i in ids if ids.count(i) > 1})
             if dup:
-                raise ValueError(f"ids repetidos en {block}: {dup}")
+                raise ValueError(tr("ids repetidos en {block}: {dup}", "duplicate ids in {block}: {dup}", block=block, dup=dup))
         return self
 
 
@@ -410,6 +454,10 @@ def load_config(path: str | Path) -> Config:
     path = Path(path)
     raw = _load_raw(path, ())
     try:
+        raw = _with_blacklist(raw)
+    except BlacklistError as exc:
+        raise ConfigError(path, [f"blacklist: {m}" for m in exc.messages]) from None
+    try:
         return Config.model_validate(raw)
     except ValidationError as exc:
         raise ConfigError(path, _format_errors(exc, raw)) from None
@@ -419,26 +467,28 @@ def _load_raw(path: Path, chain: tuple[Path, ...]) -> dict[str, Any]:
     path = path.resolve()
     if path in chain:
         cycle = " → ".join(p.name for p in (*chain, path))
-        raise ConfigError(path, [f"herencia circular: {cycle}"])
+        raise ConfigError(path, [tr("herencia circular: {cycle}", "circular inheritance: {cycle}", cycle=cycle)])
     if not path.is_file():
-        raise ConfigError(path, ["no existe el fichero"])
+        raise ConfigError(path, [tr("no existe el fichero", "file does not exist")])
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise ConfigError(path, [f"YAML mal formado: {exc}"]) from None
+        raise ConfigError(path, [tr("YAML mal formado: {exc}", "malformed YAML: {exc}", exc=exc)]) from None
     if not isinstance(data, dict):
-        raise ConfigError(path, ["la config debe ser un diccionario YAML"])
+        raise ConfigError(path, [tr("la config debe ser un diccionario YAML", "the config must be a YAML mapping")])
 
+    if "blacklist" in data:
+        data["blacklist"] = resolve_paths(data["blacklist"], path.parent)
     parent_ref = data.pop("extends", None)
     disabled = data.pop("disable", [])
     if not isinstance(disabled, list):
-        raise ConfigError(path, ["disable debe ser una lista de ids"])
+        raise ConfigError(path, [tr("disable debe ser una lista de ids", "disable must be a list of ids")])
 
     if parent_ref is None:
         merged = data
     else:
         if not isinstance(parent_ref, str):
-            raise ConfigError(path, ["extends debe ser una ruta a otra config"])
+            raise ConfigError(path, [tr("extends debe ser una ruta a otra config", "extends must be a path to another config")])
         parent = _load_raw(path.parent / parent_ref, (*chain, path))
         merged = _merge(parent, data)
 
@@ -446,11 +496,33 @@ def _load_raw(path: Path, chain: tuple[Path, ...]) -> dict[str, Any]:
         known = {r.get("id") for b in _RULE_BLOCKS for r in merged.get(b, []) if isinstance(r, dict)}
         missing = sorted(set(disabled) - known)
         if missing:
-            raise ConfigError(path, [f"disable menciona ids que no existen: {missing}"])
+            raise ConfigError(path, [tr("disable menciona ids que no existen: {missing}", "disable mentions ids that do not exist: {missing}", missing=missing)])
         for block in _RULE_BLOCKS:
             if block in merged:
                 merged[block] = [r for r in merged[block] if r.get("id") not in disabled]
     return merged
+
+
+def _with_blacklist(raw: dict[str, Any]) -> dict[str, Any]:
+    """Añade las sustituciones `kb-…` generadas desde los CSV de la lista negra.
+
+    Si la config ya tiene una entrada `kb-…` (p. ej. excepciones añadidas en
+    la UI), se combina con la generada en lugar de duplicarla.
+    """
+    try:
+        policy = BlacklistPolicy.model_validate(raw.get("blacklist") or {})
+    except ValidationError:
+        return raw  # el error lo da la validación de la config completa
+    subs = [r for r in raw.get("substitutions") or [] if isinstance(r, dict)]
+    overrides = {r["id"]: r for r in subs if str(r.get("id", "")).startswith(KB_PREFIX)}
+    generated = build_rules(policy, overrides)
+    if not generated and not overrides:
+        return raw
+    out = dict(raw)
+    kept = [r for r in raw.get("substitutions") or [] if not (isinstance(r, dict) and r.get("id") in overrides)]
+    # Las de la config van primero: a igualdad de coincidencia gana la regla anterior
+    out["substitutions"] = kept + generated
+    return out
 
 
 def _merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
@@ -458,7 +530,7 @@ def _merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
     for key, value in child.items():
         if key in _RULE_BLOCKS and isinstance(value, list) and isinstance(out.get(key), list):
             out[key] = _merge_rules(out[key], value)
-        elif key in ("detection", "metadata", "redaction", "logos", "ocr", "audit") and isinstance(value, dict) and isinstance(out.get(key), dict):
+        elif key in ("detection", "metadata", "redaction", "logos", "ocr", "audit", "blacklist") and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], value)
         else:
             out[key] = value
@@ -506,7 +578,7 @@ def _format_errors(exc: ValidationError, raw: dict[str, Any]) -> list[str]:
                 parts.append(("." if parts else "") + str(loc))
                 node = node.get(loc) if isinstance(node, dict) else None
         msg = err["msg"].removeprefix("Value error, ")
-        messages.append(f"{''.join(parts) or '(raíz)'}: {msg}")
+        messages.append(f"{''.join(parts) or tr('(raíz)', '(root)')}: {msg}")
     return messages
 
 
@@ -548,8 +620,13 @@ def check_overlaps(config: Config) -> list[Issue]:
                         issues.append(
                             Issue(
                                 "error",
-                                f"la sustitución '{sub.id}' modificaría '{m.group(0)}' dentro de "
-                                f"'{example}', protegido por la lista blanca '{wl.id}'",
+                                tr(
+                                    "la sustitución '{sub}' modificaría '{match}' dentro de "
+                                    "'{example}', protegido por la lista blanca '{wl}'",
+                                    "substitution '{sub}' would modify '{match}' inside "
+                                    "'{example}', protected by whitelist '{wl}'",
+                                    sub=sub.id, match=m.group(0), example=example, wl=wl.id,
+                                ),
                             )
                         )
                         break
@@ -564,17 +641,28 @@ def check_overlaps(config: Config) -> list[Issue]:
                     issues.append(
                         Issue(
                             "error",
-                            f"'{sample}' (sustitución '{sub.id}') encaja entero con la lista "
-                            f"blanca '{wl.id}' y nunca se sustituiría. Si no es un tag, "
-                            f"añade una excepción a '{wl.id}' (exceptions)",
+                            tr(
+                                "'{sample}' (sustitución '{sub}') encaja entero con la lista "
+                                "blanca '{wl}' y nunca se sustituiría. Si no es un tag, "
+                                "añade una excepción a '{wl}' (exceptions)",
+                                "'{sample}' (substitution '{sub}') fully matches whitelist "
+                                "'{wl}' and would never be replaced. If it is not a tag, "
+                                "add an exception to '{wl}' (exceptions)",
+                                sample=sample, sub=sub.id, wl=wl.id,
+                            ),
                         )
                     )
                 else:
                     issues.append(
                         Issue(
                             "warning",
-                            f"'{sample}' (sustitución '{sub.id}') contiene '{m.group(0)}', "
-                            f"protegido por la lista blanca '{wl.id}': la sustitución quedaría a medias",
+                            tr(
+                                "'{sample}' (sustitución '{sub}') contiene '{match}', "
+                                "protegido por la lista blanca '{wl}': la sustitución quedaría a medias",
+                                "'{sample}' (substitution '{sub}') contains '{match}', "
+                                "protected by whitelist '{wl}': the substitution would be partial",
+                                sample=sample, sub=sub.id, match=m.group(0), wl=wl.id,
+                            ),
                         )
                     )
 
@@ -584,9 +672,15 @@ def check_overlaps(config: Config) -> list[Issue]:
             issues.append(
                 Issue(
                     "warning",
-                    f"la sustitución '{sub.id}' encaja con números sueltos ({', '.join(numeric)}): "
-                    f"puede alcanzar números de lazo o de equipo. Hazla más específica "
-                    f"(prefijo, longitud exacta) o comprueba el resultado",
+                    tr(
+                        "la sustitución '{sub}' encaja con números sueltos ({numbers}): "
+                        "puede alcanzar números de lazo o de equipo. Hazla más específica "
+                        "(prefijo, longitud exacta) o comprueba el resultado",
+                        "substitution '{sub}' matches bare numbers ({numbers}): "
+                        "it may hit loop or equipment numbers. Make it more specific "
+                        "(prefix, exact length) or check the result",
+                        sub=sub.id, numbers=", ".join(numeric),
+                    ),
                 )
             )
         sample = sub.replacement.format(n=1) if "{n}" in sub.replacement else sub.replacement
@@ -596,8 +690,13 @@ def check_overlaps(config: Config) -> list[Issue]:
                     issues.append(
                         Issue(
                             "error",
-                            f"el texto de sustitución '{sample}' de '{sub.id}' vuelve a encajar "
-                            f"con la sustitución '{other.id}'",
+                            tr(
+                                "el texto de sustitución '{sample}' de '{sub}' vuelve a encajar "
+                                "con la sustitución '{other}'",
+                                "replacement text '{sample}' of '{sub}' matches "
+                                "substitution '{other}' again",
+                                sample=sample, sub=sub.id, other=other.id,
+                            ),
                         )
                     )
 
@@ -618,9 +717,15 @@ def check_overlaps(config: Config) -> list[Issue]:
             issues.append(
                 Issue(
                     "warning",
-                    f"la sustitución '{sub.id}' da '{sub.replacement}' a términos que parecen "
-                    f"entidades distintas ({', '.join(g[0] for g in groups)}): al revertir se "
-                    f"usará uno solo. Si no son sinónimos, usa {{n}} en replacement",
+                    tr(
+                        "la sustitución '{sub}' da '{replacement}' a términos que parecen "
+                        "entidades distintas ({terms}): al revertir se "
+                        "usará uno solo. Si no son sinónimos, usa {{n}} en replacement",
+                        "substitution '{sub}' gives '{replacement}' to terms that look like "
+                        "different entities ({terms}): reverting will use "
+                        "only one. If they are not synonyms, use {{n}} in replacement",
+                        sub=sub.id, replacement=sub.replacement, terms=", ".join(g[0] for g in groups),
+                    ),
                 )
             )
 
@@ -630,15 +735,20 @@ def check_overlaps(config: Config) -> list[Issue]:
             key = term.casefold()
             if key in seen and seen[key] != sub.id:
                 issues.append(
-                    Issue("warning", f"el término '{term}' está en '{seen[key]}' y en '{sub.id}'")
+                    Issue("warning", tr("el término '{term}' está en '{a}' y en '{b}'", "term '{term}' is in '{a}' and in '{b}'", term=term, a=seen[key], b=sub.id))
                 )
             seen.setdefault(key, sub.id)
             if len(term) < SHORT_TERM_LENGTH:
                 issues.append(
                     Issue(
                         "warning",
-                        f"el término '{term}' (sustitución '{sub.id}') es muy corto y puede "
-                        f"aparecer como palabra suelta en otros contextos",
+                        tr(
+                            "el término '{term}' (sustitución '{sub}') es muy corto y puede "
+                            "aparecer como palabra suelta en otros contextos",
+                            "term '{term}' (substitution '{sub}') is very short and may "
+                            "appear as a standalone word in other contexts",
+                            term=term, sub=sub.id,
+                        ),
                     )
                 )
     return issues
@@ -656,18 +766,20 @@ def explain(config: Config, text: str) -> list[str]:
     for wl in config.whitelist:
         for m in wl.regex.finditer(text):
             protected.append(m.span())
-            lines.append(f"  protegido  '{m.group(0)}' ← whitelist '{wl.id}'")
+            lines.append(tr("  protegido  '{m}' ← whitelist '{wl}'", "  protected  '{m}' ← whitelist '{wl}'", m=m.group(0), wl=wl.id))
     for sub in config.substitutions:
         for rx in sub.matchers:
             for m in rx.finditer(text):
                 a, b = m.span()
                 clash = any(a < pb and pa < b for pa, pb in protected)
                 if sub.excepted(m.group(0)):
-                    verdict = "EXCEPCIÓN de la regla: se conserva"
+                    verdict = tr("EXCEPCIÓN de la regla: se conserva", "rule EXCEPTION: kept")
                 else:
-                    verdict = "BLOQUEADO por la lista blanca" if clash else f"→ '{sub.replacement}'"
-                lines.append(f"  sustituir  '{m.group(0)}' ← '{sub.id}' ({sub.category.value}) {verdict}")
-    return lines or ["  (ninguna regla encaja)"]
+                    verdict = tr("BLOQUEADO por la lista blanca", "BLOCKED by the whitelist") if clash else f"→ '{sub.replacement}'"
+                lines.append(
+                    tr("  sustituir  ", "  replace    ") + f"'{m.group(0)}' ← '{sub.id}' ({sub.category.value}) {verdict}"
+                )
+    return lines or [tr("  (ninguna regla encaja)", "  (no rule matches)")]
 
 
 # --------------------------------------------------------------------------
@@ -678,38 +790,44 @@ def explain(config: Config, text: str) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="validate-config",
-        description="Valida una config YAML de reglas y detecta solapes entre lista blanca y sustituciones.",
+        description=tr(
+            "Valida una config YAML de reglas y detecta solapes entre lista blanca y sustituciones.",
+            "Validates a YAML rules config and detects overlaps between whitelist and substitutions.",
+        ),
     )
-    parser.add_argument("config", type=Path, help="config YAML (p. ej. configs/cliente.yaml)")
+    parser.add_argument("config", type=Path, help=tr("config YAML (p. ej. configs/cliente.yaml)", "YAML config (e.g. configs/client.yaml)"))
     parser.add_argument(
         "--check",
         action="append",
         default=[],
-        metavar="TEXTO",
-        help="muestra qué reglas encajan en TEXTO (se puede repetir)",
+        metavar=tr("TEXTO", "TEXT"),
+        help=tr("muestra qué reglas encajan en TEXTO (se puede repetir)", "shows which rules match TEXT (repeatable)"),
     )
     args = parser.parse_args(argv)
 
     try:
         config = load_config(args.config)
     except ConfigError as exc:
-        print(f"ERROR en {exc.source}:", file=sys.stderr)
+        print(tr("ERROR en {source}:", "ERROR in {source}:", source=exc.source), file=sys.stderr)
         for msg in exc.messages:
             print(f"  - {msg}", file=sys.stderr)
         return 1
 
     print(f"{config.name} ({args.config})")
     print(
-        f"  lista blanca: {len(config.whitelist)} · sustituciones: {len(config.substitutions)}"
-        f" · zonas: {len(config.zones)}"
+        tr(
+            "  lista blanca: {w} · sustituciones: {s} · zonas: {z}",
+            "  whitelist: {w} · substitutions: {s} · zones: {z}",
+            w=len(config.whitelist), s=len(config.substitutions), z=len(config.zones),
+        )
     )
     issues = check_overlaps(config)
     errors = [i for i in issues if i.severity == "error"]
     for issue in issues:
-        label = "ERROR" if issue.severity == "error" else "aviso"
+        label = "ERROR" if issue.severity == "error" else tr("aviso", "warning")
         print(f"  {label}: {issue.message}")
     if not issues:
-        print("  sin solapes entre lista blanca y sustituciones")
+        print(tr("  sin solapes entre lista blanca y sustituciones", "  no overlaps between whitelist and substitutions"))
 
     for text in args.check:
         print(f"\n'{text}':")

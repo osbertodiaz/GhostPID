@@ -13,7 +13,7 @@ hereda el entorno de la terminal. Este lanzador:
   abre la ventana de revisión;
 - muestra en un diálogo los errores que en la terminal irían a stderr.
 
-`PID_ANONYMOUSE_SELFTEST=1` comprueba el paquete sin abrir ventanas.
+`GHOSTPID_SELFTEST=1` comprueba el paquete sin abrir ventanas.
 """
 
 from __future__ import annotations
@@ -43,8 +43,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-APP_NAME = "PID Anonymouse"
-SHARED_CONFIGS = ("base.yaml", "example.yaml")
+from sanitizer.i18n import tr
+
+APP_NAME = "GhostPID"
+SHARED_CONFIGS = ("base.yaml", "example.yaml", "blacklist/industria.csv")
 
 
 # --------------------------------------------------------------------------
@@ -81,6 +83,7 @@ def _ensure_workspace(root: Path) -> None:
     for name in SHARED_CONFIGS:
         bundled = _bundle_dir() / "configs" / name
         if not (configs / name).exists() and bundled.exists():
+            (configs / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(bundled, configs / name)
 
 
@@ -142,10 +145,10 @@ def new_config(root: Path, name: str) -> Path:
     """Config de cliente nueva a partir del ejemplo (hereda de base.yaml)."""
     slug = re.sub(r"[^a-z0-9_-]+", "-", name.strip().lower()).strip("-")
     if not slug or slug in ("base", "example"):
-        raise ValueError("nombre de cliente no válido")
+        raise ValueError(tr("nombre de cliente no válido", "invalid client name"))
     target = root / "configs" / f"{slug}.yaml"
     if target.exists():
-        raise ValueError(f"ya existe {target.name}")
+        raise ValueError(tr("ya existe {n}", "{n} already exists", n=target.name))
     example = root / "configs" / "example.yaml"
     text = example.read_text(encoding="utf-8")
     text = re.sub(r"^name:.*$", f"name: {name.strip()}", text, count=1, flags=re.MULTILINE)
@@ -164,32 +167,32 @@ class StartDialog(QDialog):
     def __init__(self, root: Path) -> None:
         super().__init__()
         self.root = root
-        self.setWindowTitle(f"{APP_NAME} · abrir documento")
+        self.setWindowTitle(tr("{app} · abrir documento", "{app} · open document", app=APP_NAME))
         self.setMinimumWidth(680)
         form = QFormLayout(self)
-        form.addRow(QLabel(f"Carpeta de trabajo: {root}"))
+        form.addRow(QLabel(tr("Carpeta de trabajo: {r}", "Working folder: {r}", r=root)))
         tesseract = _find_tesseract()
-        form.addRow(QLabel(f"OCR (tesseract): {tesseract or 'no encontrado: el OCR no funcionará'}"))
+        form.addRow(QLabel(f"OCR (tesseract): {tesseract or tr('no encontrado: el OCR no funcionará', 'not found: OCR will not work')}"))
 
         self.pdf = QLineEdit()
-        pick_pdf = QPushButton("Elegir…")
+        pick_pdf = QPushButton(tr("Elegir…", "Choose…"))
         pick_pdf.clicked.connect(self._pick_pdf)
-        form.addRow("PDF original:", self._row(self.pdf, pick_pdf))
+        form.addRow(tr("PDF original:", "Original PDF:"), self._row(self.pdf, pick_pdf))
 
         self.config = QComboBox()
         self.config.setEditable(True)
         self._load_configs()
-        pick_cfg = QPushButton("Elegir…")
+        pick_cfg = QPushButton(tr("Elegir…", "Choose…"))
         pick_cfg.clicked.connect(self._pick_config)
-        new_cfg = QPushButton("Nueva…")
-        new_cfg.setToolTip("Crea configs/<cliente>.yaml a partir del ejemplo")
+        new_cfg = QPushButton(tr("Nueva…", "New…"))
+        new_cfg.setToolTip(tr("Crea configs/<cliente>.yaml a partir del ejemplo", "Creates configs/<client>.yaml from the example"))
         new_cfg.clicked.connect(self._new_config)
-        form.addRow("Config del cliente:", self._row(self.config, pick_cfg, new_cfg))
+        form.addRow(tr("Config del cliente:", "Client config:"), self._row(self.config, pick_cfg, new_cfg))
 
         self.repair = QSpinBox()
         self.repair.setRange(0, 5)
         self.repair.setValue(1)
-        form.addRow("Pasadas de autocorrección:", self.repair)
+        form.addRow(tr("Pasadas de autocorrección:", "Self-repair passes:"), self.repair)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Open | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._accept)
@@ -215,17 +218,17 @@ class StartDialog(QDialog):
 
     def _pick_pdf(self) -> None:
         start = self.root / "data"
-        path, _ = QFileDialog.getOpenFileName(self, "PDF original", str(start if start.is_dir() else self.root), "PDF (*.pdf)")
+        path, _ = QFileDialog.getOpenFileName(self, tr("PDF original", "Original PDF"), str(start if start.is_dir() else self.root), "PDF (*.pdf)")
         if path:
             self.pdf.setText(path)
 
     def _pick_config(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Config del cliente", str(self.root / "configs"), "YAML (*.yaml *.yml)")
+        path, _ = QFileDialog.getOpenFileName(self, tr("Config del cliente", "Client config"), str(self.root / "configs"), "YAML (*.yaml *.yml)")
         if path:
             self.config.setEditText(path)
 
     def _new_config(self) -> None:
-        name, ok = QInputDialog.getText(self, "Nueva config", "Nombre del cliente:")
+        name, ok = QInputDialog.getText(self, tr("Nueva config", "New config"), tr("Nombre del cliente:", "Client name:"))
         if not ok or not name.strip():
             return
         try:
@@ -237,9 +240,15 @@ class StartDialog(QDialog):
         QMessageBox.information(
             self,
             APP_NAME,
-            f"Creada {path.relative_to(self.root)} a partir del ejemplo.\n\n"
-            "Contiene nombres ficticios: cámbialos por los de tu cliente desde la UI "
-            "(Añadir término) o editando el YAML.",
+            tr(
+                "Creada {p} a partir del ejemplo.\n\n"
+                "Contiene nombres ficticios: cámbialos por los de tu cliente desde la UI "
+                "(Añadir término) o editando el YAML.",
+                "Created {p} from the example.\n\n"
+                "It contains fictitious names: replace them with your client's from the UI "
+                "(Add term) or by editing the YAML.",
+                p=path.relative_to(self.root),
+            ),
         )
 
     def config_path(self) -> Path:
@@ -253,13 +262,13 @@ class StartDialog(QDialog):
     def _accept(self) -> None:
         pdf, cfg = Path(self.pdf.text().strip()), self.config_path()
         if not pdf.is_file():
-            QMessageBox.warning(self, APP_NAME, "Elige un PDF que exista.")
+            QMessageBox.warning(self, APP_NAME, tr("Elige un PDF que exista.", "Choose a PDF that exists."))
             return
         if not cfg.is_file():
-            QMessageBox.warning(self, APP_NAME, "Elige la config YAML del cliente (o crea una con «Nueva…»).")
+            QMessageBox.warning(self, APP_NAME, tr("Elige la config YAML del cliente (o crea una con «Nueva…»).", "Choose the client YAML config (or create one with “New…”)."))
             return
         if cfg.name in SHARED_CONFIGS:
-            QMessageBox.warning(self, APP_NAME, "La UI edita la config: usa la de un cliente, no base ni example.")
+            QMessageBox.warning(self, APP_NAME, tr("La UI edita la config: usa la de un cliente, no base ni example.", "The UI edits the config: use a client one, not base or example."))
             return
         self.accept()
 
@@ -273,7 +282,7 @@ def _excepthook(kind: type, value: BaseException, tb: object) -> None:
     text = "".join(traceback.format_exception(kind, value, tb))
     if sys.__stderr__ is not None:
         sys.__stderr__.write(text)
-    QMessageBox.critical(None, APP_NAME, f"Error inesperado:\n\n{value}\n\n{text[-2000:]}")
+    QMessageBox.critical(None, APP_NAME, tr("Error inesperado:", "Unexpected error:") + f"\n\n{value}\n\n{text[-2000:]}")
 
 
 def self_test() -> int:
@@ -313,22 +322,24 @@ def self_test() -> int:
 def main() -> int:
     root = project_root()
     prepare_environment(root)
-    if os.environ.get("PID_ANONYMOUSE_SELFTEST"):
+    # PID_ANONYMOUSE_SELFTEST: nombre anterior, se sigue aceptando.
+    if os.environ.get("GHOSTPID_SELFTEST") or os.environ.get("PID_ANONYMOUSE_SELFTEST"):
         return self_test()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
     sys.excepthook = _excepthook
 
     from sanitizer.rules import ConfigError  # import diferido: arranque más rápido
-    from sanitizer.ui import ReviewWindow
+    from sanitizer.ui import ReviewWindow, install_translations
 
+    install_translations(app)
     dialog = StartDialog(root)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return 0
     try:
         window = ReviewWindow(Path(dialog.pdf.text().strip()), dialog.config_path(), repair_passes=dialog.repair.value())
     except ConfigError as exc:
-        QMessageBox.critical(None, APP_NAME, "La config no es válida:\n\n" + "\n".join(exc.messages))
+        QMessageBox.critical(None, APP_NAME, tr("La config no es válida:", "The config is not valid:") + "\n\n" + "\n".join(exc.messages))
         return 1
     window.show()
     window.start()

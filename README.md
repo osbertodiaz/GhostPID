@@ -1,4 +1,4 @@
-# PID_Anonymouse
+# GhostPID
 
 Herramienta Python que corre en local para anonimizar P&ID y PFD en PDF antes de
 pasarlos a cualquier LLM. Elimina la información sensible (empresa, cajetín,
@@ -10,7 +10,29 @@ La anonimización es **determinista** (reglas, regex y coordenadas). No se usa
 ningún LLM para redactar. Toda redacción elimina el texto real con
 `apply_redactions`; no basta con taparlo.
 
-> **Manual de uso** (instalación, app de revisión, reglas y problemas frecuentes): [docs/MANUAL.md](docs/MANUAL.md)
+> **Manual de uso** (instalación, app de revisión, reglas y problemas frecuentes): [docs/MANUAL.md](docs/MANUAL.md) · English: [docs/MANUAL.en.md](docs/MANUAL.en.md)
+
+## Idioma
+
+La UI de revisión, la app de escritorio, la salida y los `--help` de los
+comandos, los mensajes de error de la config y los informes Markdown salen en
+**español si el sistema operativo está en español** (cualquier `es_*`) y en
+**inglés en cualquier otro caso**. Se lee el idioma de la interfaz del sistema
+(`AppleLanguages` en macOS, `GetUserDefaultUILanguage` en Windows) y, si no
+hay, las variables `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` y `LANG`. Para forzarlo:
+
+```bash
+GHOSTPID_LANG=en uv run validate-config configs/example.yaml
+```
+
+No se traducen las claves YAML, los ids de reglas, las categorías
+(`company`, `manufacturer`…), las columnas del CSV de la lista negra, las
+denominaciones genéricas (`EPC-n`, `VENDOR-n`…), las claves del JSON de los
+informes ni los nombres de fichero (`auditoria.md`). El mecanismo está en
+[src/sanitizer/i18n.py](src/sanitizer/i18n.py): cada texto se escribe en los
+dos idiomas allí donde se usa, `tr("texto", "text")`, sin catálogos que
+compilar ni empaquetar. Los tests fuerzan español por
+defecto (`tests/conftest.py`).
 
 ## Requisitos
 
@@ -93,6 +115,60 @@ solapes entre lista blanca y sustituciones (sale con código 1 si hay errores).
 
 **Las configs de cliente contienen los nombres que se quieren ocultar**: git
 solo versiona `base.yaml` y `example.yaml`.
+
+### Lista negra de la industria
+
+Además de las reglas del cliente, el software ya sabe qué buscar:
+`configs/blacklist/industria.csv` es una base de datos pública con más de mil
+empresas que aparecen en P&ID y PFD de petróleo y gas, química, gases
+industriales, farmacéutica y energía:
+
+| Categoría (`category`) | Qué incluye | Sustitución |
+|---|---|---|
+| `epc` | ingenierías y contratistas EPC/EPCM | `EPC-{n}` |
+| `licensor` | licenciantes de tecnología | `LICENSOR-{n}` |
+| `manufacturer` | fabricantes de equipos, válvulas, instrumentos y marcas | `VENDOR-{n}` |
+| `operator` | operadores, propietarios y gases industriales | `OPR-{n}` |
+
+`base.yaml` la carga con el bloque `blacklist` y la convierte en las
+sustituciones `kb-epc`, `kb-licensor`, `kb-manufacturer` y `kb-operator`.
+Columnas del CSV: `name,aliases,category,segment,industries,country,active,notes`
+(separador `,` o `;`, UTF-8; se edita bien en Excel). Los alias van separados
+por `|` y comparten denominación con el nombre principal: "Endress+Hauser" y
+"E+H" son el mismo `VENDOR-n`. Las marcas de un grupo (Fisher, Rosemount) van
+en filas propias para que `revert` devuelva el nombre correcto.
+
+Salvaguardas, porque un nombre de empresa puede ser vocabulario de P&ID:
+
+- solo palabras completas, también en OCR y en la auditoría ("Linde" no
+  encaja en "CYLINDER");
+- siglas en mayúsculas de hasta 5 caracteres distinguen mayúsculas;
+- se rechazan términos de menos de 3 caracteres, los formados solo por
+  vocabulario de P&ID ("Shell", "Crane", "Total", "Weir", "Gate Valve") y los
+  duplicados entre entidades; el error indica fichero y línea.
+
+```bash
+uv run blacklist stats                       # resumen por categoría e industria
+uv run blacklist find valve                  # buscar por nombre, alias o segmento
+uv run blacklist check "FISHER 667 / SHELL SIDE"
+uv run blacklist add "Nombre SA" --category fabricante --aliases "NSA|Nombre" --industries pharma
+```
+
+`add` (y **Añadir término…** en la UI con una regla `kb-…`) escribe en
+`configs/blacklist/propia.csv`, que git ignora: ahí van los nombres privados
+(clientes, plantas). Los nombres públicos de la industria pueden añadirse a
+`industria.csv` y versionarse. Todos los CSV de `configs/blacklist/` se
+consolidan al cargar la config. En la config del cliente:
+
+```yaml
+blacklist:
+  industries: [pharma]   # solo filas de estas industrias (y las generales)
+  exclude: [Vega]        # términos que no se buscan en este set
+  enabled: false         # desactivarla
+substitutions:
+  - id: kb-manufacturer  # excepciones de la lista (falsos positivos)
+    exceptions: [Samson]
+```
 
 ## Limpieza de metadatos (fase 3)
 
@@ -302,9 +378,9 @@ quedan marcadas como desactualizadas hasta «Recalcular». La UI no edita
 
 ## App de escritorio
 
-**Windows**: descarga `PID-Anonymouse-windows-x64.zip` de la página de
-[Releases](https://github.com/osbertodiaz/PID_Anonymouse/releases), descomprímelo
-y abre `PID Anonymouse.exe`. No hace falta instalar nada: el OCR (tesseract
+**Windows**: descarga `GhostPID-windows-x64.zip` de la página de
+[Releases](https://github.com/osbertodiaz/GhostPID/releases), descomprímelo
+y abre `GhostPID.exe`. No hace falta instalar nada: el OCR (tesseract
 con inglés y español) va incluido. `data/` y `configs/` se crean junto al
 .exe. La construye el workflow `.github/workflows/windows.yml` al subir un
 tag `v*`; también se puede lanzar a mano desde Actions.
@@ -312,12 +388,12 @@ tag `v*`; también se puede lanzar a mano desde Actions.
 **macOS** (desde el código, con tesseract de Homebrew):
 
 ```bash
-./scripts/build_app.sh   # → dist/PID Anonymouse.app
+./scripts/build_app.sh   # → dist/GhostPID.app
 ```
 
 La app de macOS usa `data/` y `configs/` del proyecto, así que se abre desde
 `dist/` (no la muevas a Aplicaciones). Al arrancar pide el PDF y la config
-del cliente, o crea una a partir del ejemplo. `PID_ANONYMOUSE_SELFTEST=1`
+del cliente, o crea una a partir del ejemplo. `GHOSTPID_SELFTEST=1`
 comprueba el paquete sin abrir ventanas (módulos, tesseract y OCR).
 
 ## Estructura
@@ -325,6 +401,7 @@ comprueba el paquete sin abrir ventanas (módulos, tesseract y OCR).
 ```
 src/sanitizer/   motores: metadatos, texto, zonas, logos, verificación
 configs/         reglas YAML por cliente o plantilla
+configs/blacklist/  lista negra de la industria (CSV)
 tests/           tests con PDFs sintéticos generados con reportlab
 data/            PDFs reales y mapas de sustitución (fuera de git)
 ```

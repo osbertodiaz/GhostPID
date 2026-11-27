@@ -38,6 +38,7 @@ from sanitizer.mapping import MapError, inside_data, load_map
 from sanitizer.metadata import verify_metadata
 from sanitizer.ocr import ocr_page
 from sanitizer.redact import _blocks, _open_with_all_layers, _without_annotations, ocr_normalize, to_bytes
+from sanitizer.i18n import is_spanish, tr
 
 # Términos más cortos no se buscan en los objetos del PDF ni en OCR: darían
 # coincidencias por azar
@@ -52,6 +53,39 @@ COLORS = {
     "logo": (0.55, 0.2, 0.7),
     "finding": (1.0, 0.0, 0.6),  # resto encontrado por la auditoría
 }
+
+
+# Las claves de `checks`, `Finding.check` y las líneas de revisión son datos
+# estables del JSON (en español); solo se traducen al mostrarlas
+_DISPLAY = {
+    "texto": "text",
+    "objeto": "object",
+    "objetos": "objects",
+    "metadatos": "metadata",
+    "anotación": "annotation",
+    "formulario": "form",
+    "revisión": "review",
+    "lista negra": "blacklist",
+    "autocorrección": "self-repair",
+    "páginas": "pages",
+    "revisados": "checked",
+    "problemas": "problems",
+    "líneas": "lines",
+    "listadas": "listed",
+    "literales": "literals",
+    "patrones": "patterns",
+    "industria": "industry",
+    "reauditadas": "re-audited",
+}
+
+
+def display(key: str) -> str:
+    """Nombre de una comprobación o dato del informe en el idioma actual."""
+    return key if is_spanish() else _DISPLAY.get(key, key)
+
+
+def _checks_line(data: dict[str, Any]) -> str:
+    return ", ".join(f"{display(k)} {v}" for k, v in data.items())
 
 
 @dataclass(frozen=True)
@@ -131,6 +165,24 @@ class Blacklist:
     generics: set[str]
     # Excepciones de cada regla: coincidencias descartadas al revisar
     excepted: dict[str, Any] = field(default_factory=dict)
+    # Literales de la lista negra de la industria: solo palabras completas
+    # ("LINDE" no es un resto dentro de "CYLINDER")
+    words: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self._word_rx = self._word_ocr_rx = None
+        if self.words:
+            alts = sorted({r"\s*".join(re.escape(w) for w in lit.split()) for lit in self.words}, key=len, reverse=True)
+            self._word_rx = re.compile(rf"(?<!\w)(?:{'|'.join(alts)})(?!\w)", re.IGNORECASE)
+            alts = sorted({r"\s*".join(re.escape(w) for w in ocr_normalize(lit).split()) for lit in self.words}, key=len, reverse=True)
+            self._word_ocr_rx = re.compile(rf"(?<!\w)(?:{'|'.join(alts)})(?!\w)")
+
+    def _word_hits(self, text: str, ocr: bool = False) -> list[tuple[int, int, str]]:
+        rx = self._word_ocr_rx if ocr else self._word_rx
+        if rx is None:
+            return []
+        haystack = ocr_normalize(text) if ocr else text
+        return [(m.start(), m.end(), text[m.start() : m.end()]) for m in rx.finditer(haystack)]
 
     def _pattern_hits(self, text: str) -> list[tuple[int, int, str]]:
         hits = []
@@ -151,7 +203,7 @@ class Blacklist:
             words = lit.split()
             rx = re.compile(r"\s*".join(re.escape(w) for w in words) if len(words) > 1 else re.escape(lit), re.IGNORECASE)
             hits += [(m.start(), m.end(), lit) for m in rx.finditer(text)]
-        return hits + self._pattern_hits(text)
+        return hits + self._word_hits(text) + self._pattern_hits(text)
 
     def ocr_hits(self, text: str) -> list[tuple[int, int, str]]:
         """Como text_hits, tolerando confusiones de OCR en los literales."""
@@ -163,28 +215,35 @@ class Blacklist:
             words = ocr_normalize(lit).split()
             rx = re.compile(r"\s*".join(re.escape(w) for w in words))
             hits += [(m.start(), m.end(), lit) for m in rx.finditer(norm)]
-        return hits + self._pattern_hits(text)
+        return hits + self._word_hits(text, ocr=True) + self._pattern_hits(text)
 
 
 def build_blacklist(config: Any, map_data: dict[str, Any] | None) -> Blacklist:
     literals: set[str] = set()
+    words: set[str] = set()
     generics: set[str] = set()
+    word_rules = {rule.id for rule in config.substitutions if rule.word_only}
     for rule in config.substitutions:
-        literals.update(" ".join(t.split()) for t in rule.terms)
+        (words if rule.word_only else literals).update(" ".join(t.split()) for t in rule.terms)
         if rule.replacement:
             generics.add(rule.replacement.split("{")[0].strip("-_ ").casefold())
     if map_data:
         for value, entry in map_data["entries"].items():
-            literals.update(" ".join(o.split()) for o in entry["originals"])
+            kb = entry.get("rule") in word_rules or str(entry.get("rule") or "").startswith("kb-")
+            (words if kb else literals).update(" ".join(o.split()) for o in entry["originals"])
             if value:
                 generics.add(value.casefold())
-    # Un original que coincide con una denominación genérica no es un resto
-    literals = {lit for lit in literals if lit and lit.casefold() not in generics}
-    # Un original del mapa que luego se declaró excepción tampoco
-    literals = {lit for lit in literals if not any(rule.excepted(lit) for rule in config.substitutions)}
+
+    def keep(lit: str) -> bool:
+        # Un original que coincide con una denominación genérica no es un resto,
+        # ni uno del mapa que luego se declaró excepción
+        return bool(lit) and lit.casefold() not in generics and not any(rule.excepted(lit) for rule in config.substitutions if rule.exceptions)
+
+    literals = {lit for lit in literals if keep(lit)}
+    words = {w for w in words if keep(w)} - literals
     patterns = [(rule.id, rx) for rule in config.substitutions for rx in rule.pattern_regexes]
     excepted = {rule.id: rule for rule in config.substitutions if rule.exceptions}
-    return Blacklist(sorted(literals, key=lambda s: (-len(s), s)), patterns, generics, excepted)
+    return Blacklist(sorted(literals, key=lambda s: (-len(s), s)), patterns, generics, excepted, sorted(words))
 
 
 def _protected_spans(config: Any, text: str) -> list[tuple[int, int]]:
@@ -229,10 +288,14 @@ def _check_text(path: Path, config: Any, blacklist: Blacklist, result: AuditResu
         result.checks["texto"] = {"páginas": doc.page_count}
 
 
+def _decoded(raw: bytes) -> str:
+    return raw.decode("utf-16-be" if b"\x00" in raw else "utf-8", errors="replace")
+
+
 def _check_objects(path: Path, blacklist: Blacklist, result: AuditResult) -> None:
     """Literales en cualquier objeto del PDF (streams descomprimidos, sin imágenes)."""
     literals = [lit for lit in blacklist.literals if len(lit) >= MIN_LITERAL]
-    rxs = []
+    rxs: list[tuple[str | None, re.Pattern[bytes]]] = []
     for lit in literals:
         for encoding in ("utf-8", "utf-16-be"):
             try:
@@ -240,6 +303,18 @@ def _check_objects(path: Path, blacklist: Blacklist, result: AuditResult) -> Non
             except UnicodeEncodeError:
                 continue
             rxs.append((lit, re.compile(re.escape(raw), re.IGNORECASE)))
+    # Lista negra de la industria: una regex por codificación, palabra completa
+    words = [w for w in blacklist.words if len(w) >= MIN_LITERAL]
+    if words:
+        for encoding, edge in (("utf-8", rb"[A-Za-z0-9]"), ("utf-16-be", rb"\x00[A-Za-z0-9]")):
+            alts = []
+            for w in sorted(words, key=len, reverse=True):
+                try:
+                    alts.append(re.escape(w.encode(encoding)))
+                except UnicodeEncodeError:
+                    continue
+            body = b"|".join(alts)
+            rxs.append((None, re.compile(rb"(?<!" + edge + rb")(?:" + body + rb")(?!" + edge + rb")", re.IGNORECASE)))
     scanned = 0
     with pikepdf.open(path) as pdf:
         for obj in pdf.objects:
@@ -260,13 +335,15 @@ def _check_objects(path: Path, blacklist: Blacklist, result: AuditResult) -> Non
                 continue
             scanned += 1
             for lit, rx in rxs:
-                if rx.search(data):
-                    result.findings.append(Finding("error", "objeto", lit, None, f"objeto {obj.objgen}"))
+                m = rx.search(data)
+                if m:
+                    result.findings.append(Finding("error", "objeto", lit or _decoded(m.group()), None, tr("objeto {o}", "object {o}", o=obj.objgen)))
         try:
             trailer = pdf.trailer.unparse(resolved=True)
             for lit, rx in rxs:
-                if rx.search(trailer):
-                    result.findings.append(Finding("error", "objeto", lit, None, "trailer"))
+                m = rx.search(trailer)
+                if m:
+                    result.findings.append(Finding("error", "objeto", lit or _decoded(m.group()), None, "trailer"))
         except Exception:
             pass
     result.checks["objetos"] = {"revisados": scanned}
@@ -357,7 +434,7 @@ def _check_ocr(
                     if crossed:
                         # El OCR leyó en otra orientación texto real que ya pasó el control de texto
                         severity = "warning"
-                        label = f"{label} · lectura OCR girada de '{crossed}'"
+                        label = label + tr(" · lectura OCR girada de '{c}'", " · rotated OCR reading of '{c}'", c=crossed)
                     result.findings.append(
                         Finding(
                             severity,
@@ -552,12 +629,22 @@ def audit(
     """
     path, outdir = Path(path), Path(outdir)
     if not inside_data(outdir / "x"):
-        raise MapError(f"el informe de auditoría contiene valores originales: solo dentro de data/ (no en {outdir})")
+        raise MapError(
+            tr(
+                "el informe de auditoría contiene valores originales: solo dentro de data/ (no en {d})",
+                "the audit report contains original values: only inside data/ (not in {d})",
+                d=outdir,
+            )
+        )
     outdir.mkdir(parents=True, exist_ok=True)
 
     result = AuditResult(path.name)
     blacklist = build_blacklist(config, map_data)
-    result.checks["lista negra"] = {"literales": len(blacklist.literals), "patrones": len(blacklist.patterns)}
+    result.checks["lista negra"] = {
+        "literales": len(blacklist.literals),
+        "patrones": len(blacklist.patterns),
+        "industria": len(blacklist.words),
+    }
 
     _check_text(path, config, blacklist, result)
     _check_objects(path, blacklist, result)
@@ -621,65 +708,91 @@ def _ranges(pages: list[int]) -> str:
 def format_markdown(result: AuditResult) -> str:
     errors = [f for f in result.findings if f.severity == "error"]
     warnings = [f for f in result.findings if f.severity == "warning"]
+    t = tr
+    verdict = "OK" if result.ok else t("FALLOS ({n})", "FAILED ({n})", n=len(errors))
     lines = [
-        f"# Auditoría: {result.file}",
+        t("# Auditoría: {f}", "# Audit: {f}", f=result.file),
         "",
-        f"**Resultado: {'OK' if result.ok else f'FALLOS ({len(errors)})'}**"
-        + (f" · {len(warnings)} avisos" if warnings else ""),
+        t("**Resultado: {v}**", "**Result: {v}**", v=verdict)
+        + (t(" · {n} avisos", " · {n} warnings", n=len(warnings)) if warnings else ""),
         "",
-        "## Comprobaciones",
+        t("## Comprobaciones", "## Checks"),
         "",
     ]
     for name, data in result.checks.items():
-        lines.append(f"- {name}: " + ", ".join(f"{k} {v}" for k, v in data.items()))
+        lines.append(f"- {display(name)}: " + _checks_line(data))
 
     if result.findings:
-        lines += ["", "## Hallazgos", "", "| Gravedad | Comprobación | Página | Texto | Dónde / regla |", "|---|---|---:|---|---|"]
+        lines += [
+            "",
+            t("## Hallazgos", "## Findings"),
+            "",
+            t("| Gravedad | Comprobación | Página | Texto | Dónde / regla |", "| Severity | Check | Page | Text | Where / rule |"),
+            "|---|---|---:|---|---|",
+        ]
         for f in result.findings:
-            lines.append(f"| {f.severity} | {f.check} | {f.page or '-'} | {f.text} | {f.where} |")
+            lines.append(f"| {f.severity} | {display(f.check)} | {f.page or '-'} | {f.text} | {f.where} |")
 
     removed = result.removed
     if removed:
-        lines += ["", "## Qué se ha eliminado", "", "| Regla | Categoría | Veces | Páginas | Origen |", "|---|---|---:|---|---|"]
+        lines += [
+            "",
+            t("## Qué se ha eliminado", "## What was removed"),
+            "",
+            t("| Regla | Categoría | Veces | Páginas | Origen |", "| Rule | Category | Count | Pages | Source |"),
+            "|---|---|---:|---|---|",
+        ]
         for rule, e in sorted(removed["reglas"].items(), key=lambda kv: -kv[1]["veces"]):
             origin = ", ".join(f"{k} ×{v}" for k, v in e["origen"].items())
             lines.append(f"| {rule} | {e['categoría']} | {e['veces']} | {_ranges(e['páginas'])} | {origin} |")
         if removed["zonas"]:
-            lines += ["", "Zonas eliminadas:"]
-            lines += [f"- {z}: páginas {_ranges(p)}" for z, p in removed["zonas"].items()]
+            lines += ["", t("Zonas eliminadas:", "Zones removed:")]
+            lines += [t("- {z}: páginas {p}", "- {z}: pages {p}", z=z, p=_ranges(p)) for z, p in removed["zonas"].items()]
         if removed["logos"]:
-            lines += ["", "Imágenes eliminadas (logos):"]
+            lines += ["", t("Imágenes eliminadas (logos):", "Images removed (logos):")]
+            pages_word = t("páginas", "pages")
             lines += [
-                f"- `{g['hash']}` {g['size'][0]}×{g['size'][1]} px, páginas {_ranges(g['pages'])} ({g['reason']})"
+                f"- `{g['hash']}` {g['size'][0]}×{g['size'][1]} px, {pages_word} {_ranges(g['pages'])} ({g['reason']})"
                 for g in removed["logos"]
             ]
         lines += [
             "",
-            f"Coincidencias bloqueadas por la lista blanca: {removed['bloqueadas']} · "
-            f"coincidencias rozadas: {removed['rozadas']}",
+            t(
+                "Coincidencias bloqueadas por la lista blanca: {b} · coincidencias rozadas: {r}",
+                "Matches blocked by the whitelist: {b} · near misses: {r}",
+                b=removed["bloqueadas"], r=removed["rozadas"],
+            ),
         ]
-        lines += [f"- aviso: {w}" for w in removed["avisos"]]
+        lines += [t("- aviso: {w}", "- warning: {w}", w=w) for w in removed["avisos"]]
 
-    lines += ["", "## Texto restante para revisar", ""]
+    lines += ["", t("## Texto restante para revisar", "## Remaining text to review"), ""]
     if result.review_lines:
         lines.append(
-            "Líneas en la franja del cajetín que no son datos protegidos ni denominaciones "
-            "genéricas. Si alguna es un nombre, añádelo a las reglas."
+            t(
+                "Líneas en la franja del cajetín que no son datos protegidos ni denominaciones "
+                "genéricas. Si alguna es un nombre, añádelo a las reglas.",
+                "Lines in the title block strip that are neither protected data nor generic "
+                "designations. If any of them is a name, add it to the rules.",
+            )
         )
-        lines += ["", "| Texto | Páginas | Origen |", "|---|---|---|"]
+        lines += ["", t("| Texto | Páginas | Origen |", "| Text | Pages | Source |"), "|---|---|---|"]
         for e in result.review_lines:
             text = e["texto"].replace("|", "\\|")
-            lines.append(f"| {text} | {_ranges(e['páginas'])} | {', '.join(e['origen'])} |")
+            lines.append(f"| {text} | {_ranges(e['páginas'])} | {', '.join(display(o) for o in e['origen'])} |")
     else:
-        lines.append("(nada)")
+        lines.append(t("(nada)", "(nothing)"))
 
     if result.images:
         lines += [
             "",
-            "## Revisión visual",
+            t("## Revisión visual", "## Visual review"),
             "",
-            "Colores: azul = sustitución en el texto · naranja = sustitución por OCR · "
-            "rojo = zona · morado = logo · verde = anotación o formulario · rosa = resto encontrado.",
+            t(
+                "Colores: azul = sustitución en el texto · naranja = sustitución por OCR · "
+                "rojo = zona · morado = logo · verde = anotación o formulario · rosa = resto encontrado.",
+                "Colors: blue = text substitution · orange = OCR substitution · "
+                "red = zone · purple = logo · green = annotation or form · pink = leftover found.",
+            ),
             "",
         ]
         lines += [f"- [{Path(img).name}]({img})" for img in result.images]
@@ -694,14 +807,17 @@ def format_markdown(result: AuditResult) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="audit",
-        description="Audita un PDF anonimizado: lista negra (texto, objetos, OCR), metadatos y revisión visual.",
+        description=tr(
+            "Audita un PDF anonimizado: lista negra (texto, objetos, OCR), metadatos y revisión visual.",
+            "Audits an anonymized PDF: blacklist (text, objects, OCR), metadata and visual review.",
+        ),
     )
-    parser.add_argument("pdf", type=Path, help="PDF anonimizado")
-    parser.add_argument("--config", type=Path, required=True, help="config YAML del cliente")
-    parser.add_argument("--out", type=Path, required=True, help="carpeta del informe (dentro de data/)")
-    parser.add_argument("--original", type=Path, help="PDF original (para marcar los logos eliminados)")
-    parser.add_argument("--anon-report", type=Path, help="informe JSON de anonymize (--report)")
-    parser.add_argument("--map", type=Path, help="mapa de sustitución: sus originales entran en la lista negra")
+    parser.add_argument("pdf", type=Path, help=tr("PDF anonimizado", "anonymized PDF"))
+    parser.add_argument("--config", type=Path, required=True, help=tr("config YAML del cliente", "client YAML config"))
+    parser.add_argument("--out", type=Path, required=True, help=tr("carpeta del informe (dentro de data/)", "report folder (inside data/)"))
+    parser.add_argument("--original", type=Path, help=tr("PDF original (para marcar los logos eliminados)", "original PDF (to mark the removed logos)"))
+    parser.add_argument("--anon-report", type=Path, help=tr("informe JSON de anonymize (--report)", "JSON report from anonymize (--report)"))
+    parser.add_argument("--map", type=Path, help=tr("mapa de sustitución: sus originales entran en la lista negra", "substitution map: its originals join the blacklist"))
     args = parser.parse_args(argv)
 
     from sanitizer.rules import ConfigError, load_config  # evita import circular
@@ -720,13 +836,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     errors = [f for f in result.findings if f.severity == "error"]
-    print(f"{args.pdf}: {'OK' if result.ok else f'FALLOS ({len(errors)})'}")
+    print(f"{args.pdf}: " + ("OK" if result.ok else tr("FALLOS ({n})", "FAILED ({n})", n=len(errors))))
     for name, data in result.checks.items():
-        print(f"  {name}: " + ", ".join(f"{k} {v}" for k, v in data.items()))
+        print(f"  {display(name)}: " + _checks_line(data))
     for f in errors[:20]:
-        print(f"  ERROR ({f.check}, pág {f.page or '-'}): '{f.text}' {f.where}")
-    print(f"  texto restante para revisar: {len(result.review_lines)} líneas")
-    print(f"  informe: {args.out / 'auditoria.md'}")
+        print(
+            tr("  ERROR ({c}, pág {p}): '{t}' {w}", "  ERROR ({c}, page {p}): '{t}' {w}", c=display(f.check), p=f.page or "-", t=f.text, w=f.where)
+        )
+    print(tr("  texto restante para revisar: {n} líneas", "  remaining text to review: {n} lines", n=len(result.review_lines)))
+    print(tr("  informe: {r}", "  report: {r}", r=args.out / "auditoria.md"))
     return 0 if result.ok else 1
 
 

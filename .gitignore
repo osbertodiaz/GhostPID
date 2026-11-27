@@ -28,3 +28,8 @@ dist/
 configs/*
 !configs/base.yaml
 !configs/example.yaml
+# Lista negra: se versiona la base pública de la industria; los CSV propios
+# (p. ej. propia.csv, con nombres de clientes) se quedan fuera de git
+!configs/blacklist/
+configs/blacklist/*
+!configs/blacklist/industria.csv

@@ -27,6 +27,7 @@ import pymupdf
 from pydantic import ConfigDict
 
 from sanitizer.stroke_text import StrokeTextParams, find_stroke_text
+from sanitizer.i18n import tr
 
 
 @dataclass(frozen=True)
@@ -64,18 +65,30 @@ PREVIEW_CHARS = 80
 # Claves PDF que indican JavaScript (/JS o /S /JavaScript), como nombre completo
 _JS_TOKEN = re.compile(r"/(JS|JavaScript)(?![A-Za-z0-9])")
 
-PAGE_KIND_LABELS = {
-    "text": "texto vectorial",
-    "text_and_stroke_text": "texto vectorial + texto en trazos (necesita OCR en esas zonas)",
-    "stroke_text_only": "solo texto en trazos, sin capa de texto (necesita OCR)",
-    "image_only": "solo imagen (escaneado o raster, necesita OCR)",
-    "image_with_text": "imagen con capa de texto (posible OCR previo)",
-    "invisible_text_over_vectors": (
-        "texto invisible sobre trazos (AutoCAD/SHX): se extrae, pero lo visible son trazos"
+_PAGE_KIND_LABELS = {
+    "text": ("texto vectorial", "vector text"),
+    "text_and_stroke_text": (
+        "texto vectorial + texto en trazos (necesita OCR en esas zonas)",
+        "vector text + text as paths (needs OCR in those areas)",
     ),
-    "vector_only": "solo trazos, sin texto detectado",
-    "empty": "vacía",
+    "stroke_text_only": (
+        "solo texto en trazos, sin capa de texto (necesita OCR)",
+        "text as paths only, no text layer (needs OCR)",
+    ),
+    "image_only": ("solo imagen (escaneado o raster, necesita OCR)", "image only (scanned or raster, needs OCR)"),
+    "image_with_text": ("imagen con capa de texto (posible OCR previo)", "image with a text layer (possibly OCRed before)"),
+    "invisible_text_over_vectors": (
+        "texto invisible sobre trazos (AutoCAD/SHX): se extrae, pero lo visible son trazos",
+        "invisible text over paths (AutoCAD/SHX): it is extracted, but what is visible are paths",
+    ),
+    "vector_only": ("solo trazos, sin texto detectado", "paths only, no text detected"),
+    "empty": ("vacía", "empty"),
 }
+
+
+def page_kind_label(kind: str) -> str:
+    """Descripción del tipo de página en el idioma actual."""
+    return tr(*_PAGE_KIND_LABELS[kind])
 
 
 # --------------------------------------------------------------------------
@@ -97,7 +110,7 @@ def inspect_pdf(
         report["encrypted"] = bool(doc.needs_pass or doc.is_encrypted)
         if doc.needs_pass:
             # Sin contraseña no se puede inspeccionar el contenido
-            report["error"] = "PDF protegido con contraseña: no se puede inspeccionar."
+            report["error"] = tr("PDF protegido con contraseña: no se puede inspeccionar.", "Password-protected PDF: it cannot be inspected.")
             return report
 
         report["page_count"] = doc.page_count
@@ -306,7 +319,7 @@ def classify_page(
     invisible_chars: int = 0,
     detection: DetectionParams = DEFAULT_DETECTION,
 ) -> str:
-    """Clasifica una página según su contenido (ver PAGE_KIND_LABELS)."""
+    """Clasifica una página según su contenido (ver _PAGE_KIND_LABELS)."""
     is_image = image_coverage >= detection.image_coverage_threshold
     has_stroke_text = stroke_glyphs >= detection.stroke_text_min_glyphs
     if is_image:
@@ -381,78 +394,87 @@ def _summary(report: dict[str, Any]) -> dict[str, Any]:
 
 def format_markdown(report: dict[str, Any]) -> str:
     """Convierte el inventario en un informe Markdown legible."""
-    lines = [f"# Inventario: {report['file']}", ""]
+    t = tr
+    lines = [t("# Inventario: {f}", "# Inventory: {f}", f=report["file"]), ""]
     if "error" in report:
         return "\n".join(lines + [f"**Error:** {report['error']}", ""])
 
     s = report["summary"]
-    yes = lambda flag: "sí" if flag else "no"  # noqa: E731
+    yes = lambda flag: t("sí", "yes") if flag else "no"  # noqa: E731
+    none_m, none_f = t("- (ninguno)", "- (none)"), t("- (ninguna)", "- (none)")
+    kinds = ", ".join(f"{page_kind_label(k)} ×{n}" for k, n in s["page_kinds"].items())
     lines += [
-        "## Resumen",
+        t("## Resumen", "## Summary"),
         "",
-        f"- Tamaño: {report['size_bytes'] / 1024:.1f} KB · PDF {report['pdf_version']}"
-        f" · cifrado: {yes(report['encrypted'])}",
-        f"- Páginas: {report['page_count']} · marcadores: {report['outline_entries']}",
-        "- Tipos de página: "
-        + ", ".join(f"{PAGE_KIND_LABELS[k]} ×{n}" for k, n in s["page_kinds"].items()),
-        f"- Metadatos Info: {yes(s['has_info'])} · XMP: {yes(s['has_xmp'])}"
-        f" · IDs de documento: {len(report['document_ids'])}",
-        f"- Adjuntos: {s['embedded_files']} · anotaciones: {s['annotations']}"
-        f" · enlaces: {s['links']} · capas (OCG): {s['layers']}"
-        f" · JavaScript: {yes(s['javascript'])}",
-        f"- Fuentes: {s['fonts']} · imágenes: {s['images']}"
-        f" (repetidas en muchas páginas: {s['repeated_images']})",
-        f"- Páginas con texto invisible (capa OCR): {s['invisible_text_pages']}",
-        f"- Requiere OCR en alguna página: {yes(s['needs_ocr'])}",
+        t("- Tamaño: {kb:.1f} KB · PDF {v} · cifrado: {enc}", "- Size: {kb:.1f} KB · PDF {v} · encrypted: {enc}",
+          kb=report["size_bytes"] / 1024, v=report["pdf_version"], enc=yes(report["encrypted"])),
+        t("- Páginas: {p} · marcadores: {o}", "- Pages: {p} · bookmarks: {o}", p=report["page_count"], o=report["outline_entries"]),
+        t("- Tipos de página: ", "- Page types: ") + kinds,
+        t("- Metadatos Info: {i} · XMP: {x} · IDs de documento: {n}", "- Info metadata: {i} · XMP: {x} · document IDs: {n}",
+          i=yes(s["has_info"]), x=yes(s["has_xmp"]), n=len(report["document_ids"])),
+        t(
+            "- Adjuntos: {e} · anotaciones: {a} · enlaces: {l} · capas (OCG): {o} · JavaScript: {j}",
+            "- Attachments: {e} · annotations: {a} · links: {l} · layers (OCG): {o} · JavaScript: {j}",
+            e=s["embedded_files"], a=s["annotations"], l=s["links"], o=s["layers"], j=yes(s["javascript"]),
+        ),
+        t("- Fuentes: {f} · imágenes: {i} (repetidas en muchas páginas: {r})", "- Fonts: {f} · images: {i} (repeated on many pages: {r})",
+          f=s["fonts"], i=s["images"], r=s["repeated_images"]),
+        t("- Páginas con texto invisible (capa OCR): {n}", "- Pages with invisible text (OCR layer): {n}", n=s["invisible_text_pages"]),
+        t("- Requiere OCR en alguna página: {y}", "- Needs OCR on some page: {y}", y=yes(s["needs_ocr"])),
         "",
-        "## Metadatos Info",
+        t("## Metadatos Info", "## Info metadata"),
         "",
     ]
     lines += _kv_lines(report["info"])
 
-    lines += ["", "## Metadatos XMP", ""]
+    lines += ["", t("## Metadatos XMP", "## XMP metadata"), ""]
     lines += _kv_lines(report["xmp"])
 
-    lines += ["", "## IDs del documento (trailer /ID)", ""]
-    lines += [f"- `{i}`" for i in report["document_ids"]] or ["- (ninguno)"]
+    lines += ["", t("## IDs del documento (trailer /ID)", "## Document IDs (trailer /ID)"), ""]
+    lines += [f"- `{i}`" for i in report["document_ids"]] or [none_m]
 
-    lines += ["", "## Adjuntos embebidos", ""]
+    lines += ["", t("## Adjuntos embebidos", "## Embedded files"), ""]
     lines += [
         f"- {f['name']} → {f['filename']} ({f['size']} bytes) {f['description']}".rstrip()
         for f in report["embedded_files"]
-    ] or ["- (ninguno)"]
+    ] or [none_m]
 
-    lines += ["", "## Capas (OCG)", ""]
+    lines += ["", t("## Capas (OCG)", "## Layers (OCG)"), ""]
     lines += [
-        f"- [{l['xref']}] {l['name']} · {'visible' if l['on'] else 'oculta'}"
+        f"- [{l['xref']}] {l['name']} · {'visible' if l['on'] else t('oculta', 'hidden')}"
         for l in report["layers"]
-    ] or ["- (ninguna)"]
+    ] or [none_f]
 
-    lines += ["", "## Marcadores", ""]
+    page_word = t("pág", "page")
+    lines += ["", t("## Marcadores", "## Bookmarks"), ""]
     lines += [
-        f"- {'  ' * (o['level'] - 1)}{o['title']} → pág {o['page']}" for o in report["outline"]
-    ] or ["- (ninguno)"]
+        f"- {'  ' * (o['level'] - 1)}{o['title']} → {page_word} {o['page']}" for o in report["outline"]
+    ] or [none_m]
     if report["outline_entries"] > len(report["outline"]):
-        lines.append(f"- … y {report['outline_entries'] - len(report['outline'])} más")
+        lines.append(t("- … y {n} más", "- … and {n} more", n=report["outline_entries"] - len(report["outline"])))
 
     js = report["javascript"]
     lines += ["", "## JavaScript", ""]
     if js["present"] or js["open_action"] or js["catalog_additional_actions"]:
         lines += [
-            f"- Árbol /Names/JavaScript: {yes(js['names_tree'])}",
-            f"- /OpenAction en el catálogo: {yes(js['open_action'])}",
-            f"- /AA en el catálogo: {yes(js['catalog_additional_actions'])}",
-            f"- Objetos con JavaScript (xref): {js['objects'] or '-'}",
+            t("- Árbol /Names/JavaScript: {y}", "- /Names/JavaScript tree: {y}", y=yes(js["names_tree"])),
+            t("- /OpenAction en el catálogo: {y}", "- /OpenAction in the catalog: {y}", y=yes(js["open_action"])),
+            t("- /AA en el catálogo: {y}", "- /AA in the catalog: {y}", y=yes(js["catalog_additional_actions"])),
+            t("- Objetos con JavaScript (xref): {o}", "- Objects with JavaScript (xref): {o}", o=js["objects"] or "-"),
         ]
     else:
-        lines.append("- (ninguno)")
+        lines.append(none_m)
 
     lines += [
         "",
-        "## Páginas",
+        t("## Páginas", "## Pages"),
         "",
-        "| Pág | Tamaño (mm) | Rot | Palabras | Car. invisibles | Imágenes | Cobertura img "
-        "| Trazos | Glifos en trazos | Anot. | Tipo |",
+        t(
+            "| Pág | Tamaño (mm) | Rot | Palabras | Car. invisibles | Imágenes | Cobertura img "
+            "| Trazos | Glifos en trazos | Anot. | Tipo |",
+            "| Page | Size (mm) | Rot | Words | Invisible chars | Images | Image coverage "
+            "| Paths | Glyphs as paths | Annot. | Type |",
+        ),
         "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for p in report["pages"]:
@@ -460,36 +482,39 @@ def format_markdown(report: dict[str, Any]) -> str:
             f"| {p['number']} | {p['width_mm']}×{p['height_mm']} | {p['rotation']} "
             f"| {p['words']} | {p['invisible_chars']} | {p['images']} | {p['image_coverage']:.0%} "
             f"| {p['drawings']} "
-            f"| {p['stroke_text_glyphs']} | {len(p['annotations'])} | {PAGE_KIND_LABELS[p['kind']]} |"
+            f"| {p['stroke_text_glyphs']} | {len(p['annotations'])} | {page_kind_label(p['kind'])} |"
         )
 
     annotated = [p for p in report["pages"] if p["annotations"]]
     if annotated:
-        lines += ["", "## Anotaciones", ""]
+        lines += ["", t("## Anotaciones", "## Annotations"), ""]
         for p in annotated:
             for a in p["annotations"]:
                 detail = " · ".join(x for x in (a["author"], a["content"]) if x)
-                lines.append(f"- Pág {p['number']}: {a['type']}" + (f" · {detail}" if detail else ""))
+                lines.append(t("- Pág {n}: {a}", "- Page {n}: {a}", n=p["number"], a=a["type"]) + (f" · {detail}" if detail else ""))
 
     lines += [
         "",
-        "## Imágenes",
+        t("## Imágenes", "## Images"),
         "",
-        "| Hash | xrefs | Tamaño (px) | Páginas | Repetida |",
+        t("| Hash | xrefs | Tamaño (px) | Páginas | Repetida |", "| Hash | xrefs | Size (px) | Pages | Repeated |"),
         "|---|---|---|---|---|",
     ]
     lines += [
         f"| `{i['hash']}` | {_page_ranges(i['xrefs'])} | {i['width']}×{i['height']} "
         f"| {_page_ranges(i['pages'])} "
-        f"| {'sí (¿logo/sello?)' if i['repeated'] else 'no'} |"
+        f"| {t('sí (¿logo/sello?)', 'yes (logo/stamp?)') if i['repeated'] else 'no'} |"
         for i in report["images"]
-    ] or ["| (ninguna) | | | | |"]
+    ] or [t("| (ninguna) | | | | |", "| (none) | | | | |")]
 
     lines += [
         "",
-        "## Fuentes",
+        t("## Fuentes", "## Fonts"),
         "",
-        "| Fuente | Tipo | Embebida | Subset | Codificación | Páginas (recursos) |",
+        t(
+            "| Fuente | Tipo | Embebida | Subset | Codificación | Páginas (recursos) |",
+            "| Font | Type | Embedded | Subset | Encoding | Pages (resources) |",
+        ),
         "|---|---|---|---|---|---|",
     ]
     for f in report["fonts"]:
@@ -498,13 +523,13 @@ def format_markdown(report: dict[str, Any]) -> str:
             f"| {f['encoding'] or '-'} | {_page_ranges(f['pages'])} |"
         )
     if not report["fonts"]:
-        lines.append("| (ninguna) | | | | | |")
+        lines.append(t("| (ninguna) | | | | | |", "| (none) | | | | | |"))
 
     return "\n".join(lines) + "\n"
 
 
 def _kv_lines(data: dict[str, str]) -> list[str]:
-    return [f"- **{k}**: {v}" for k, v in data.items()] or ["- (vacío)"]
+    return [f"- **{k}**: {v}" for k, v in data.items()] or [tr("- (vacío)", "- (empty)")]
 
 
 def _page_ranges(pages: list[int]) -> str:
@@ -543,17 +568,23 @@ def _collect_pdfs(inputs: list[str]) -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="inventory",
-        description="Inventario de PDFs (metadatos, adjuntos, anotaciones, capas, texto, fuentes).",
+        description=tr(
+            "Inventario de PDFs (metadatos, adjuntos, anotaciones, capas, texto, fuentes).",
+            "PDF inventory (metadata, attachments, annotations, layers, text, fonts).",
+        ),
     )
-    parser.add_argument("inputs", nargs="+", help="PDFs o carpetas (se recorren recursivamente)")
+    parser.add_argument("inputs", nargs="+", help=tr("PDFs o carpetas (se recorren recursivamente)", "PDFs or folders (walked recursively)"))
     parser.add_argument(
-        "--out", type=Path, help="Carpeta donde guardar <nombre>.inventory.md (p. ej. data/reports)"
+        "--out", type=Path, help=tr("Carpeta donde guardar <nombre>.inventory.md (p. ej. data/reports)", "Folder to save <name>.inventory.md in (e.g. data/reports)")
     )
-    parser.add_argument("--json", action="store_true", help="Guardar también <nombre>.inventory.json")
+    parser.add_argument("--json", action="store_true", help=tr("Guardar también <nombre>.inventory.json", "Also save <name>.inventory.json"))
     parser.add_argument(
         "--config",
         type=Path,
-        help="Config YAML de cliente: usa sus umbrales de detección (bloque detection)",
+        help=tr(
+            "Config YAML de cliente: usa sus umbrales de detección (bloque detection)",
+            "Client YAML config: use its detection thresholds (detection block)",
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -564,18 +595,21 @@ def main(argv: list[str] | None = None) -> int:
         try:
             detection = load_config(args.config).detection
         except ConfigError as exc:
-            parser.error(f"config inválida: {exc}")
+            parser.error(tr("config inválida: {exc}", "invalid config: {exc}", exc=exc))
 
     pdfs = _collect_pdfs(args.inputs)
     if not pdfs:
-        parser.error("no se encontró ningún PDF")
+        parser.error(tr("no se encontró ningún PDF", "no PDF found"))
 
     if args.out:
         args.out.mkdir(parents=True, exist_ok=True)
         if "data" not in args.out.resolve().parts:
             print(
-                f"AVISO: {args.out} está fuera de data/. El informe contiene datos reales "
-                "y no debe acabar en git.",
+                tr(
+                    "AVISO: {out} está fuera de data/. El informe contiene datos reales y no debe acabar en git.",
+                    "WARNING: {out} is outside data/. The report contains real data and must not end up in git.",
+                    out=args.out,
+                ),
                 file=sys.stderr,
             )
 
@@ -584,7 +618,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             report = inspect_pdf(pdf, detection)
         except Exception as exc:  # un PDF corrupto no debe parar el lote
-            print(f"ERROR en {pdf}: {exc}", file=sys.stderr)
+            print(tr("ERROR en {pdf}: {exc}", "ERROR in {pdf}: {exc}", pdf=pdf, exc=exc), file=sys.stderr)
             status = 1
             continue
 
