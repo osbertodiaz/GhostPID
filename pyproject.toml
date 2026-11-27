@@ -25,6 +25,7 @@ redact = "sanitizer.redact:main"
 anonymize = "sanitizer.pipeline:main"
 revert = "sanitizer.mapping:main"
 audit = "sanitizer.audit:main"
+review = "sanitizer.ui:main"
 
 [dependency-groups]
 dev = [
