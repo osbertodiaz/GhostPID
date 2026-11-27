@@ -179,19 +179,43 @@ class RedactionReport:
 
 
 class Namer:
-    """Asigna denominaciones genéricas coherentes dentro de un documento.
+    """Asigna denominaciones genéricas coherentes.
 
     El contador va por plantilla, no por regla: dos reglas con VENDOR-{n} no
-    pueden dar VENDOR-1 a dos fabricantes distintos.
+    pueden dar VENDOR-1 a dos fabricantes distintos. Puede partir de un mapa
+    existente (`from_entries`) para que la numeración siga siendo la misma en
+    todos los documentos de un proyecto.
+
+    `entries` es la materia prima del mapa de sustitución (fase 6): por cada
+    denominación, su plantilla, número, regla, categoría y los originales con
+    cuántas veces aparecieron y cuántas se leyeron del texto real (no de OCR).
     """
 
     def __init__(self) -> None:
         self._values: dict[tuple[str, str], str] = {}
         self._counters: dict[str, int] = {}
         self.mapping: dict[str, list[str]] = {}
+        self.entries: dict[str, dict[str, Any]] = {}
 
-    def name(self, template: str, original: str) -> str:
+    @classmethod
+    def from_entries(cls, entries: dict[str, dict[str, Any]]) -> "Namer":
+        namer = cls()
+        for value, entry in entries.items():
+            template = entry["template"]
+            for original in entry["originals"]:
+                namer._values[(template, normalize(original))] = value
+            if entry.get("n"):
+                namer._counters[template] = max(namer._counters.get(template, 0), entry["n"])
+            namer.entries[value] = {
+                **entry,
+                "originals": {o: dict(stats) for o, stats in entry["originals"].items()},
+            }
+        return namer
+
+    def name(self, template: str, original: str, rule: Any = None, exact: bool = True) -> str:
+        """Denominación para `original`. `exact`: leído del texto real (no OCR)."""
         key = (template, normalize(original))
+        n = None
         if key not in self._values:
             if "{n}" in template:
                 n = self._counters.get(template, 0) + 1
@@ -203,6 +227,17 @@ class Namer:
         originals = self.mapping.setdefault(value, [])
         if original not in originals:
             originals.append(original)
+
+        entry = self.entries.setdefault(
+            value, {"template": template, "n": n, "rule": None, "category": None, "originals": {}}
+        )
+        if rule is not None and entry["rule"] is None:
+            entry["rule"] = rule.id
+            entry["category"] = rule.category.value
+        # Los saltos de línea y espacios del plano no distinguen originales
+        stats = entry["originals"].setdefault(" ".join(original.split()), {"count": 0, "exact": 0})
+        stats["count"] += 1
+        stats["exact"] += int(exact)
         return value
 
 
@@ -314,7 +349,7 @@ def substitute_text(
     out = text
     done = []
     for m in sorted(matches, key=lambda m: m.start, reverse=True):
-        value = namer.name(m.rule.replacement, text[m.start : m.end])
+        value = namer.name(m.rule.replacement, text[m.start : m.end], m.rule)
         out = out[: m.start] + value + out[m.end :]
         done.append((m, value))
     return out, list(reversed(done)), blocked
@@ -477,7 +512,7 @@ def _plan_page(
                 report.near_misses.append(Blocked(page.number + 1, "page", rule.id, context, "límite de token"))
         for m in matches:
             original = text[m.start : m.end]
-            value = namer.name(m.rule.replacement, original)
+            value = namer.name(m.rule.replacement, original, m.rule)
             span_chars = [c for c in chars[m.start : m.end] if c.bbox is not None and not c.c.isspace()]
             if not span_chars:
                 continue
@@ -722,13 +757,14 @@ class Session:
         config: Any,
         policy: RedactionPolicy | None = None,
         detection: DetectionParams | None = None,
+        namer: Namer | None = None,
     ) -> None:
         self.src = Path(src)
         self.config = config
         self.policy = policy or config.redaction
         self.detection = detection or config.detection
         self.report = RedactionReport()
-        self.namer = Namer()
+        self.namer = namer or Namer()
         self.doc, self.layer_state = _open_with_all_layers(self.src, self.policy)
         self.layers_restored = self.layer_state is None
         self.line_art: dict[int, list[tuple[list, bool]]] = collections.defaultdict(list)

@@ -298,7 +298,7 @@ def ocr_redact(session: Session, only: set[int] | None = None) -> set[int]:
             session.add_line_art(number, areas)
 
         for hit in hits:
-            value = session.namer.name(hit.rule.replacement, hit.original)
+            value = session.namer.name(hit.rule.replacement, hit.original, hit.rule, exact=False)
             insert_replacement(
                 page,
                 value,
