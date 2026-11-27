@@ -298,6 +298,26 @@ config inválida o con solapes, se deshace. Tras un cambio, las detecciones
 quedan marcadas como desactualizadas hasta «Recalcular». La UI no edita
 `base.yaml` ni `example.yaml`.
 
+## App de escritorio
+
+**Windows**: descarga `PID-Anonymouse-windows-x64.zip` de la página de
+[Releases](https://github.com/osbertodiaz/PID_Anonymouse/releases), descomprímelo
+y abre `PID Anonymouse.exe`. No hace falta instalar nada: el OCR (tesseract
+con inglés y español) va incluido. `data/` y `configs/` se crean junto al
+.exe. La construye el workflow `.github/workflows/windows.yml` al subir un
+tag `v*`; también se puede lanzar a mano desde Actions.
+
+**macOS** (desde el código, con tesseract de Homebrew):
+
+```bash
+./scripts/build_app.sh   # → dist/PID Anonymouse.app
+```
+
+La app de macOS usa `data/` y `configs/` del proyecto, así que se abre desde
+`dist/` (no la muevas a Aplicaciones). Al arrancar pide el PDF y la config
+del cliente, o crea una a partir del ejemplo. `PID_ANONYMOUSE_SELFTEST=1`
+comprueba el paquete sin abrir ventanas (módulos, tesseract y OCR).
+
 ## Estructura
 
 ```
