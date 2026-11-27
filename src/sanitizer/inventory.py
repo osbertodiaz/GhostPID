@@ -18,32 +18,42 @@ import hashlib
 import json
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pikepdf
 import pymupdf
+from pydantic import ConfigDict
 
-from sanitizer.stroke_text import find_stroke_text
+from sanitizer.stroke_text import StrokeTextParams, find_stroke_text
 
-# Fracción de la página cubierta por imágenes a partir de la cual se
-# considera que la página es "de imagen" (escaneado o plano rasterizado).
-IMAGE_COVERAGE_THRESHOLD = 0.5
 
-# Glifos en trazos (ver stroke_text) a partir de los cuales se considera que
-# la página tiene texto convertido a curvas. Calibrado con planos AutoCAD/SHX:
-# logos y cajetines dan < 40; un P&ID con tags en SHX, > 90.
-STROKE_TEXT_MIN_GLYPHS = 50
+@dataclass(frozen=True)
+class DetectionParams:
+    """Umbrales de diagnóstico. Valores por defecto calibrados con un corpus de
+    P&ID reales (docs/corpus-pid.md); cada config puede ajustarlos en `detection`.
+    """
 
-# Caracteres invisibles mínimos para considerar que una página vectorial lleva
-# una capa de texto invisible sobre trazos (AutoCAD exporta así el texto SHX)
-INVISIBLE_TEXT_MIN_CHARS = 20
+    __pydantic_config__ = ConfigDict(extra="forbid")
 
-# Páginas mínimas en las que aparece una misma imagen para marcarla como
-# repetida (logos, sellos, cajetines rasterizados). Es un número absoluto y no
-# una fracción: en un set mixto el logo puede estar solo en las páginas
-# vectoriales y no en las escaneadas.
-REPEATED_IMAGE_MIN_PAGES = 3
+    # Fracción de la página cubierta por imágenes a partir de la cual se
+    # considera que la página es "de imagen" (escaneado o plano rasterizado)
+    image_coverage_threshold: float = 0.5
+    # Glifos en trazos a partir de los cuales la página tiene texto convertido
+    # a curvas. En el corpus: logos y cajetines < 45; P&ID con tags en SHX > 90
+    stroke_text_min_glyphs: int = 50
+    # Caracteres invisibles mínimos para considerar que una página vectorial
+    # lleva texto invisible sobre trazos (AutoCAD exporta así el texto SHX)
+    invisible_text_min_chars: int = 20
+    # Páginas mínimas en las que aparece una imagen para marcarla como repetida
+    # (logo, sello). Absoluto y no fracción: en un set mixto el logo puede estar
+    # solo en las páginas vectoriales y no en las escaneadas
+    repeated_image_min_pages: int = 3
+    stroke_text: StrokeTextParams = field(default_factory=StrokeTextParams)
+
+
+DEFAULT_DETECTION = DetectionParams()
 
 # Marcadores que se listan en el informe (los títulos pueden ser sensibles)
 MAX_OUTLINE_LISTED = 40
@@ -73,7 +83,9 @@ PAGE_KIND_LABELS = {
 # --------------------------------------------------------------------------
 
 
-def inspect_pdf(path: str | Path) -> dict[str, Any]:
+def inspect_pdf(
+    path: str | Path, detection: DetectionParams = DEFAULT_DETECTION
+) -> dict[str, Any]:
     """Devuelve el inventario de un PDF como diccionario serializable a JSON."""
     path = Path(path)
     report: dict[str, Any] = {
@@ -98,9 +110,9 @@ def inspect_pdf(path: str | Path) -> dict[str, Any]:
         report["embedded_files"] = _embedded_files(doc)
         report["layers"] = _layers(doc)
         report["javascript"] = _javascript(doc)
-        report["pages"] = [_page_info(page) for page in doc]
+        report["pages"] = [_page_info(page, detection) for page in doc]
         report["fonts"] = _fonts(doc)
-        report["images"] = _images(doc)
+        report["images"] = _images(doc, detection.repeated_image_min_pages)
 
     report.update(_pikepdf_info(path))
     report["summary"] = _summary(report)
@@ -182,7 +194,7 @@ def _javascript(doc: pymupdf.Document) -> dict[str, Any]:
     }
 
 
-def _page_info(page: pymupdf.Page) -> dict[str, Any]:
+def _page_info(page: pymupdf.Page, detection: DetectionParams) -> dict[str, Any]:
     rect = page.rect
     page_area = rect.width * rect.height or 1.0
 
@@ -198,7 +210,7 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
 
     cdrawings = page.get_cdrawings()
     drawings = len(cdrawings)
-    stroke_runs = find_stroke_text(cdrawings, page.rect)
+    stroke_runs = find_stroke_text(cdrawings, page.rect, detection.stroke_text)
     stroke_glyphs = sum(r.glyphs for r in stroke_runs)
 
     annots = []
@@ -228,7 +240,7 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
         "links": len(page.get_links()),
         "annotations": annots,
         "kind": classify_page(
-            len(words), coverage, drawings, stroke_glyphs, visible_chars, invisible_chars
+            len(words), coverage, drawings, stroke_glyphs, visible_chars, invisible_chars, detection
         ),
     }
 
@@ -249,7 +261,7 @@ def _text_visibility(page: pymupdf.Page) -> tuple[int, int]:
     return visible, invisible
 
 
-def _images(doc: pymupdf.Document) -> list[dict[str, Any]]:
+def _images(doc: pymupdf.Document, min_pages: int) -> list[dict[str, Any]]:
     """Imágenes del documento por xref, con las páginas donde aparecen.
 
     Una imagen que se repite en muchas páginas suele ser un logo, un sello o
@@ -273,7 +285,7 @@ def _images(doc: pymupdf.Document) -> list[dict[str, Any]]:
                 entry["xrefs"].append(xref)
             if page.number + 1 not in entry["pages"]:
                 entry["pages"].append(page.number + 1)
-    threshold = min(REPEATED_IMAGE_MIN_PAGES, max(doc.page_count, 2))
+    threshold = min(min_pages, max(doc.page_count, 2))
     for entry in images.values():
         entry["repeated"] = len(entry["pages"]) >= threshold
     return sorted(images.values(), key=lambda e: (-len(e["pages"]), e["xrefs"][0]))
@@ -286,13 +298,14 @@ def classify_page(
     stroke_glyphs: int = 0,
     visible_chars: int = 0,
     invisible_chars: int = 0,
+    detection: DetectionParams = DEFAULT_DETECTION,
 ) -> str:
     """Clasifica una página según su contenido (ver PAGE_KIND_LABELS)."""
-    is_image = image_coverage >= IMAGE_COVERAGE_THRESHOLD
-    has_stroke_text = stroke_glyphs >= STROKE_TEXT_MIN_GLYPHS
+    is_image = image_coverage >= detection.image_coverage_threshold
+    has_stroke_text = stroke_glyphs >= detection.stroke_text_min_glyphs
     if is_image:
         return "image_with_text" if words else "image_only"
-    if invisible_chars >= INVISIBLE_TEXT_MIN_CHARS and invisible_chars > visible_chars:
+    if invisible_chars >= detection.invisible_text_min_chars and invisible_chars > visible_chars:
         # El texto se puede extraer, pero redactarlo no borra lo que se ve:
         # hay que eliminar también los trazos que hay debajo
         return "invisible_text_over_vectors"
@@ -531,7 +544,21 @@ def main(argv: list[str] | None = None) -> int:
         "--out", type=Path, help="Carpeta donde guardar <nombre>.inventory.md (p. ej. data/reports)"
     )
     parser.add_argument("--json", action="store_true", help="Guardar también <nombre>.inventory.json")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Config YAML de cliente: usa sus umbrales de detección (bloque detection)",
+    )
     args = parser.parse_args(argv)
+
+    detection = DEFAULT_DETECTION
+    if args.config:
+        from sanitizer.rules import ConfigError, load_config  # evita import circular
+
+        try:
+            detection = load_config(args.config).detection
+        except ConfigError as exc:
+            parser.error(f"config inválida: {exc}")
 
     pdfs = _collect_pdfs(args.inputs)
     if not pdfs:
@@ -549,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
     status = 0
     for pdf in pdfs:
         try:
-            report = inspect_pdf(pdf)
+            report = inspect_pdf(pdf, detection)
         except Exception as exc:  # un PDF corrupto no debe parar el lote
             print(f"ERROR en {pdf}: {exc}", file=sys.stderr)
             status = 1
