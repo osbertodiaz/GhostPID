@@ -82,3 +82,31 @@ Probada contra la capa de texto de los sets con texto extraíble. Lecciones:
   en la capa de texto (`TI` / `01234`). Los números sueltos no se protegen,
   así que una sustitución por regex numérica (p. ej. `\d{6}` para un número
   de proyecto) podría alcanzar números de lazo. **Pendiente para la fase 4.**
+
+## Metadatos: casos encontrados al limpiar (fase 3)
+
+- **`/ID` con `static_id`**: qpdf conserva el primer elemento del `/ID`
+  original (el identificador permanente) y solo fija el segundo. Hay que
+  borrar el `/ID` antes de guardar para que ambos sean el valor fijo.
+- **Info dentro del catálogo**: además del trailer, algún generador deja un
+  `/Info` con el productor dentro de `/Root`.
+- **Capas sin registrar**: en un set había 167 capas registradas en
+  `/OCProperties` y otras 460 referenciadas solo desde el contenido de las
+  páginas. Hay que renombrar todos los objetos `/Type /OCG`.
+- **Widgets fuera del formulario**: un set tenía 852 widgets (botones de
+  navegación) que no colgaban de `/AcroForm`. Borrar `/AcroForm` hacía que
+  MuPDF dejara de dibujarlos: el formulario se sanea en lugar de borrarse.
+- **Páginas fantasma**: un set combinado tenía 12 marcadores apuntando a
+  objetos de página que ya no estaban en el árbol de páginas. Esos objetos se
+  escribirían en la salida con su contenido; los destinos se descartan.
+- **Árbol de estructura**: al quitarlo, MuPDF extrae un guion blando de forma
+  distinta (`PRE\xad` → `PRE-`). El aspecto de la página no cambia.
+
+Verificado sobre los 6 sets: ninguna página cambia de aspecto (comparación de
+píxeles), la verificación con pikepdf pasa y ningún valor de Info, nombre de
+capa, autor de anotación o título de marcador original queda en ningún objeto
+de la salida, streams descomprimidos incluidos.
+
+**Pendiente para las fases 4 y 5**: el contenido de las capas **ocultas** sigue
+en el PDF (no se ve, pero se puede extraer), igual que el texto de las
+anotaciones y el valor de los campos de formulario.

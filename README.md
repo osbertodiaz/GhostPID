@@ -89,6 +89,31 @@ solapes entre lista blanca y sustituciones (sale con código 1 si hay errores).
 **Las configs de cliente contienen los nombres que se quieren ocultar**: git
 solo versiona `base.yaml` y `example.yaml`.
 
+## Limpieza de metadatos (fase 3)
+
+```bash
+uv run clean-metadata data/plano.pdf -o data/out/plano.pdf [--config configs/<cliente>.yaml]
+```
+
+Elimina Info y XMP (también el XMP de imágenes y otros objetos), datos privados
+de aplicación (`PieceInfo`, `OPI`), adjuntos, JavaScript y acciones, etiquetas
+de página, árbol de estructura y miniaturas. Sustituye el `/ID` del documento
+por un valor fijo y reescribe el fichero entero, así que desaparecen las
+revisiones incrementales antiguas. Los destinos que apuntan a páginas fuera
+del árbol de páginas ("fantasma") se descartan.
+
+Por defecto (configurable en el bloque `metadata` del YAML):
+
+- anotaciones: se conservan con su contenido, sin autor, fechas, IDs,
+  respuestas, popups ni marcas de estado de revisión;
+- enlaces: se eliminan (`keep_internal` conserva los que van a otra página);
+- capas: `Capa-001`, `Capa-002`…, con su estado visible u oculto;
+- marcadores: misma estructura con títulos `Página N`;
+- formularios: se conservan, sin XFA, con nombres `Campo-001`… y sin tooltips.
+
+No toca el contenido de las páginas (eso es la fase 4 y la 5). Al terminar
+relee el PDF con pikepdf y falla si queda algo (`verify_metadata`).
+
 ## Uso (previsto, fase 8)
 
 ```bash
