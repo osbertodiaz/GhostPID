@@ -262,6 +262,42 @@ rechaza antes de empezar.
 → `sanitize` → leer el "texto restante para revisar" de cada `auditoria.md` →
 añadir a las reglas lo que sea un nombre → repetir.
 
+## UI de revisión (fase 8)
+
+```bash
+uv run review data/plano.pdf --config configs/<cliente>.yaml [--map data/maps/<proyecto>.map.json] [--repair N]
+```
+
+Ventana PyQt6 para preparar la config de un cliente mirando el plano:
+
+- **Ver detecciones**: la página original con marcas de color por tipo
+  (sustitución, zona, logo, resto y aviso de la auditoría, coincidencia
+  rozada, bloqueada por la lista blanca, texto para revisar). La lista de la
+  derecha se filtra por tipo y página; al elegir una fila se resalta en el
+  plano (o se busca su texto). «Ver anonimizado» alterna con la versión
+  anonimizada.
+- **Descartar** un falso positivo: excepción en la regla (`exceptions`),
+  imagen a conservar (`logos.keep`) o zona desactivada (`disable`).
+- **Añadir término** a una regla existente o crear una regla nueva, con el
+  texto de la fila elegida (p. ej. una línea del "texto para revisar").
+- **Dibujar zona**: se arrastra un rectángulo, que se guarda en fracción de
+  página, para esta página, todas o una lista (`1, 3-7, -1`).
+- **Confirmar y generar**: proceso completo de `sanitize` (con OCR,
+  metadatos, auditoría y autocorrección) y abre el informe.
+
+Al abrir se cargan los informes de un `sanitize` previo si son más recientes
+que el PDF y la config. Si no, se hace una **vista previa rápida sin OCR**:
+segundos en vez de minutos, pero no ve el texto en trazos ni el escaneado.
+«Con OCR» la repite completa. La vista previa trabaja en
+`data/reports/<doc>/revision/` con una copia del mapa, así que no toca el
+mapa real.
+
+Cada cambio se escribe en la config del cliente con ruamel.yaml, que conserva
+comentarios y orden, y deja antes una copia `.bak`. Si el cambio dejaría la
+config inválida o con solapes, se deshace. Tras un cambio, las detecciones
+quedan marcadas como desactualizadas hasta «Recalcular». La UI no edita
+`base.yaml` ni `example.yaml`.
+
 ## Estructura
 
 ```
@@ -280,4 +316,4 @@ sustitución. Los tests solo usan PDFs sintéticos.
 
 0. Entorno · 1. Diagnóstico · 2. Reglas · 3. Metadatos · 4. Redacción de texto ·
 5. Zonas, logos y texto vectorial · 6. Mapa de sustitución · 7. Verificación y
-auditoría · 8. CLI y UI · 9. LLM local (opcional)
+auditoría · 8. CLI y UI de revisión · 9. LLM local (opcional)
