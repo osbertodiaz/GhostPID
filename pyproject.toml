@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 sanitize = "sanitizer.cli:main"
+inventory = "sanitizer.inventory:main"
 
 [dependency-groups]
 dev = [
