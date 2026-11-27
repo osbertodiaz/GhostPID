@@ -1,5 +1,7 @@
 # GhostPID
 
+[English](README.en.md) · **Español**
+
 Herramienta Python que corre en local para anonimizar P&ID y PFD en PDF antes de
 pasarlos a cualquier LLM. Elimina la información sensible (empresa, cajetín,
 ubicación, autoría, metadatos, fabricantes, referencias documentales, logos) y
