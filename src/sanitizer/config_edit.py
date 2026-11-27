@@ -174,3 +174,14 @@ class ConfigEditor:
         if other in block or len(rest) != len(getattr(logos, other)):
             block[other] = _flow(rest)
         return self._write(data)
+
+    def disable(self, rule_id: str) -> Config:
+        """Desactiva una regla o zona (también si es heredada) con `disable`."""
+        known = {r.id for r in (*self.config.whitelist, *self.config.substitutions, *self.config.zones)}
+        if rule_id not in known:
+            raise EditError(f"no hay ninguna regla ni zona con id '{rule_id}'")
+        data = self._read()
+        current = list(data.get("disable") or [])
+        if rule_id not in current:
+            data["disable"] = _flow([*current, rule_id])
+        return self._write(data)

@@ -94,3 +94,10 @@ def test_logo_decisions_move_between_lists(client):
     assert "0123456789abcdef" in cfg.logos.remove and "0123456789abcdef" not in cfg.logos.keep
     with pytest.raises(EditError):
         editor.set_logo("nope", remove=True)
+
+
+def test_disable_inherited_zone(client):
+    cfg = ConfigEditor(client).disable("title_block")
+    assert "title_block" not in {z.id for z in cfg.zones}
+    with pytest.raises(EditError):
+        ConfigEditor(client).disable("nada")
