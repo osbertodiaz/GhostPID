@@ -21,6 +21,7 @@ validate-config = "sanitizer.rules:main"
 clean-metadata = "sanitizer.metadata:main"
 redact = "sanitizer.redact:main"
 anonymize = "sanitizer.pipeline:main"
+revert = "sanitizer.mapping:main"
 
 [dependency-groups]
 dev = [
