@@ -94,6 +94,7 @@ class OcrLine:
     direction: tuple[float, float]
     height: float  # pt
     rotation: int
+    confidence: float = 100.0  # media de Tesseract (0–100) de las palabras de la línea
 
 
 # --------------------------------------------------------------------------
@@ -195,6 +196,7 @@ def ocr_page(page: pymupdf.Page, policy: OcrPolicy) -> list[OcrLine]:
                     ((p1.x - p0.x) / length, (p1.y - p0.y) / length),
                     line_height,
                     rotation,
+                    sum(float(data["conf"][i]) for i in indices) / len(indices),
                 )
             )
     return lines
