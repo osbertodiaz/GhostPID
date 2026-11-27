@@ -1,8 +1,5 @@
 # GhostPID
 
-> Antes se llamaba PID_Anonymouse. Las variables `PID_ANONYMOUSE_LANG` y
-> `PID_ANONYMOUSE_SELFTEST` se siguen aceptando.
-
 Herramienta Python que corre en local para anonimizar P&ID y PFD en PDF antes de
 pasarlos a cualquier LLM. Elimina la información sensible (empresa, cajetín,
 ubicación, autoría, metadatos, fabricantes, referencias documentales, logos) y
