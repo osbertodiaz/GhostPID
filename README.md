@@ -114,6 +114,41 @@ Por defecto (configurable en el bloque `metadata` del YAML):
 No toca el contenido de las páginas (eso es la fase 4 y la 5). Al terminar
 relee el PDF con pikepdf y falla si queda algo (`verify_metadata`).
 
+## Redacción de texto (fase 4)
+
+```bash
+uv run redact data/plano.pdf -o data/out/plano.pdf --config configs/<cliente>.yaml \
+    --report data/reports/plano.redact.json
+```
+
+- Las sustituciones se buscan sobre el texto de cada bloque, así que encajan
+  aunque un término esté partido en dos líneas. Todo lo que toque la lista
+  blanca se bloquea y se informa.
+- Los **tags apilados** de los globos de instrumento (`TI` sobre `01234`) se
+  reconocen por su geometría y quedan protegidos.
+- `apply_redactions` elimina el texto real. Se usa una franja estrecha en el
+  centro de cada carácter para no arrastrar líneas vecinas ni textos que se
+  solapan. En su sitio se escribe la denominación genérica (`EPC`, `VENDOR-1`…),
+  con la orientación original, también en páginas rotadas y texto vertical.
+- Según el tipo de página (bloque `redaction` del YAML): en texto normal solo
+  se quita el texto; en páginas AutoCAD/SHX (texto invisible sobre trazos)
+  también los trazos que dibujan esas letras, editando el contenido con
+  precisión (`lineart.py`); en escaneados con OCR, los píxeles bajo el texto.
+- El texto de las **capas ocultas** también se procesa (su sustitución queda
+  en una capa oculta), igual que el contenido de **anotaciones** y los valores
+  de **formularios**.
+- En páginas escaneadas los términos se buscan también dentro de palabras
+  pegadas por el OCR (`ocr_relaxed_terms`).
+- La numeración `{n}` es coherente en todo el documento.
+
+Al terminar se relee el PDF: ninguna coincidencia debe seguir ahí y ningún dato
+protegido debe haber desaparecido. El informe lista además las **coincidencias
+rozadas**: lo que una regla encontraría sin límites de palabra o de token
+(p. ej. `REF-001/002`), para afinar las reglas del cliente.
+
+El texto convertido a trazos sin capa de texto, los logos y las imágenes son
+cosa de la fase 5.
+
 ## Uso (previsto, fase 8)
 
 ```bash

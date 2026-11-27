@@ -110,3 +110,29 @@ de la salida, streams descomprimidos incluidos.
 **Pendiente para las fases 4 y 5**: el contenido de las capas **ocultas** sigue
 en el PDF (no se ve, pero se puede extraer), igual que el texto de las
 anotaciones y el valor de los campos de formulario.
+
+## Redacción de texto: casos encontrados (fase 4)
+
+Probada sobre los 4 sets con capa de texto, con una config local (ignorada por
+git) con los nombres reales: ningún nombre queda en la capa de texto y ninguna
+coincidencia de la lista blanca desaparece (unas 14 000 comprobadas).
+
+- **Interlineado apretado y textos solapados**: MuPDF borra cualquier carácter
+  cuya caja toque la redacción. Con la caja completa se perdían líneas vecinas
+  y, en un set, notas (`NOTE 4`) que se solapaban con un tag vertical. Se
+  redacta con una franja del 35–50 % de la altura de letra.
+- **Anotaciones en el texto de página**: `get_text` incluye la apariencia de
+  las anotaciones y redactar encima las borraba enteras. El texto de página se
+  busca en una copia sin anotaciones.
+- **Trazos SHX bajo texto invisible**: el modo "covered" de MuPDF mide los
+  trazos con su caja ampliada 10 × grosor (límite de inglete) y no borra
+  diagonales; "touched" mide por caja y se lleva globos y tuberías. Se editan
+  los operadores de trazado con pikepdf, por subtrazo y con la CTM. En curvas
+  solo cuentan los puntos sobre el trazo (los de control sobresalen).
+- **Capas ocultas**: MuPDF no extrae su texto; hay que activarlas, reabrir el
+  documento y restaurar su estado al guardar.
+- **Referencias con varias hojas** (`…-PID-064/065/066`) y **palabras pegadas
+  por el OCR** (`NOMBREG-A-SCOPORATION`): las reglas no encajaban. De ahí las
+  coincidencias rozadas y la búsqueda relajada en páginas escaneadas.
+- **Rendimiento**: ~1 s por página en los planos más densos (un set de 74
+  páginas tarda ~70 s).

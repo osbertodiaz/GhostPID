@@ -18,6 +18,8 @@ Python 3.12, uv, PyMuPDF, pikepdf, pdfplumber, OpenCV, pytesseract, pyyaml, pyte
 - CLI: `uv run sanitize <pdf> --config configs/<cliente>.yaml`
 - Diagnóstico: `uv run inventory data/ --out data/reports [--config configs/<cliente>.yaml]`
 - Reglas: `uv run validate-config configs/<cliente>.yaml --check "texto"`
+- Metadatos: `uv run clean-metadata <pdf> -o <salida> [--config …]`
+- Redacción: `uv run redact <pdf> -o <salida> --config … [--report data/reports/x.json]`
 
 ## Flexibilidad
 - Los sets de `data/` son solo ejemplos: no sobreajustar a ellos. Todo umbral va en un dataclass de parámetros configurable desde el bloque `detection` del YAML.
