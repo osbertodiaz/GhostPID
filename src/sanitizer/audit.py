@@ -37,7 +37,7 @@ from pydantic import ConfigDict
 from sanitizer.mapping import MapError, inside_data, load_map
 from sanitizer.metadata import verify_metadata
 from sanitizer.ocr import ocr_page
-from sanitizer.redact import _blocks, _open_with_all_layers, _without_annotations, ocr_normalize
+from sanitizer.redact import _blocks, _open_with_all_layers, _without_annotations, ocr_normalize, to_bytes
 
 # Términos más cortos no se buscan en los objetos del PDF ni en OCR: darían
 # coincidencias por azar
@@ -100,6 +100,9 @@ class Finding:
     page: int | None = None
     where: str = ""
     rect: tuple[float, float, float, float] | None = None
+    # Solo en hallazgos de OCR: dirección y altura de la línea (para corregirlos)
+    direction: tuple[float, float] | None = None
+    height: float | None = None
 
 
 @dataclass
@@ -280,11 +283,17 @@ def _check_ocr(
     blacklist: Blacklist,
     anon_report: dict[str, Any] | None,
     result: AuditResult,
+    only: set[int] | None = None,
 ) -> dict[int, list[Any]]:
-    """OCR de las páginas tal como se ven; devuelve las líneas por página."""
+    """OCR de las páginas tal como se ven; devuelve las líneas por página.
+
+    `only`: índices de página a los que limitar el OCR (reauditoría tras corregir).
+    """
     lines_by_page: dict[int, list[Any]] = {}
     with pymupdf.open(path) as doc, _without_annotations(doc) as view:
         pages = _ocr_pages(view, config, anon_report)
+        if only is not None:
+            pages = [n for n in pages if n in only]
         for number in pages:
             lines = ocr_page(view[number], config.ocr)
             lines_by_page[number] = lines
@@ -298,7 +307,16 @@ def _check_ocr(
                             r |= b
                         rect = tuple(r)
                     result.findings.append(
-                        Finding(_severity(config, line.text, start, end), "ocr", line.text[start:end], number + 1, label, rect)
+                        Finding(
+                            _severity(config, line.text, start, end),
+                            "ocr",
+                            line.text[start:end],
+                            number + 1,
+                            label,
+                            rect,
+                            tuple(line.direction),
+                            line.height,
+                        )
                     )
     result.checks["ocr"] = {"páginas": len(pages)}
     return lines_by_page
@@ -444,7 +462,7 @@ def _render_review(
     pages_dir.mkdir(parents=True, exist_ok=True)
     with pymupdf.open(path) as doc:
         # Se dibuja sobre una copia en memoria: el PDF auditado no se toca
-        review = pymupdf.open("pdf", doc.tobytes())
+        review = pymupdf.open("pdf", to_bytes(doc))
         for page in review:
             for rect, kind in marks.get(page.number + 1, []):
                 r = pymupdf.Rect(rect)
@@ -470,8 +488,16 @@ def audit(
     original: str | Path | None = None,
     anon_report: dict[str, Any] | None = None,
     map_data: dict[str, Any] | None = None,
+    ocr_only: set[int] | None = None,
+    previous: AuditResult | None = None,
+    write: bool = True,
 ) -> AuditResult:
-    """Audita `path` (PDF anonimizado) y escribe el informe en `outdir` (dentro de data/)."""
+    """Audita `path` (PDF anonimizado) y escribe el informe en `outdir` (dentro de data/).
+
+    Para reauditar tras una corrección: `ocr_only` limita el OCR a esas páginas
+    (índices) y `previous` aporta los hallazgos de OCR y las líneas de revisión
+    del resto de páginas.
+    """
     path, outdir = Path(path), Path(outdir)
     if not inside_data(outdir / "x"):
         raise MapError(f"el informe de auditoría contiene valores originales: solo dentro de data/ (no en {outdir})")
@@ -484,17 +510,40 @@ def audit(
     _check_text(path, config, blacklist, result)
     _check_objects(path, blacklist, result)
     _check_metadata(path, config, result)
-    ocr_lines = _check_ocr(path, config, blacklist, anon_report, result)
+    ocr_lines = _check_ocr(path, config, blacklist, anon_report, result, ocr_only)
     _review_text(path, config, blacklist, ocr_lines, result)
+    if previous is not None and ocr_only is not None:
+        _merge_previous(result, previous, {n + 1 for n in ocr_only})
     result.removed = summarize_removed(anon_report)
     _render_review(Path(original) if original else None, path, anon_report, result, outdir, config.audit.png_dpi)
+    if write:
+        write_audit(result, outdir)
+    return result
 
+
+def _merge_previous(result: AuditResult, previous: AuditResult, reaudited: set[int]) -> None:
+    """Conserva de la auditoría anterior lo que no se ha vuelto a comprobar."""
+    result.findings += [f for f in previous.findings if f.check == "ocr" and f.page not in reaudited]
+    if "ocr" in previous.checks:
+        result.checks["ocr"] = {**previous.checks["ocr"], "reauditadas": len(reaudited)}
+    merged = {e["texto"].casefold(): dict(e) for e in previous.review_lines}
+    for e in result.review_lines:
+        key = e["texto"].casefold()
+        if key in merged:
+            merged[key]["páginas"] = sorted(set(merged[key]["páginas"]) | set(e["páginas"]))
+            merged[key]["origen"] = sorted(set(merged[key]["origen"]) | set(e["origen"]))
+        else:
+            merged[key] = dict(e)
+    result.review_lines = sorted(merged.values(), key=lambda e: (-len(e["páginas"]), e["texto"]))
+
+
+def write_audit(result: AuditResult, outdir: str | Path) -> None:
+    outdir = Path(outdir)
     (outdir / "auditoria.json").write_text(
         json.dumps(asdict(result) | {"ok": result.ok}, indent=2, ensure_ascii=False, default=list),
         encoding="utf-8",
     )
     (outdir / "auditoria.md").write_text(format_markdown(result), encoding="utf-8")
-    return result
 
 
 # --------------------------------------------------------------------------
