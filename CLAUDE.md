@@ -20,6 +20,8 @@ Python 3.12, uv, PyMuPDF, pikepdf, pdfplumber, OpenCV, pytesseract, pyyaml, pyte
 - Reglas: `uv run validate-config configs/<cliente>.yaml --check "texto"`
 - Metadatos: `uv run clean-metadata <pdf> -o <salida> [--config …]`
 - Redacción: `uv run redact <pdf> -o <salida> --config … [--report data/reports/x.json]`
+- Fases 4+5 (zonas, logos, texto, OCR): `uv run anonymize <pdf> -o <salida> --config … [--report …]`
+- OCR necesita `brew install tesseract tesseract-lang`
 
 ## Flexibilidad
 - Los sets de `data/` son solo ejemplos: no sobreajustar a ellos. Todo umbral va en un dataclass de parámetros configurable desde el bloque `detection` del YAML.

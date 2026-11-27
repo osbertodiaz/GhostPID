@@ -136,3 +136,31 @@ coincidencia de la lista blanca desaparece (unas 14 000 comprobadas).
   coincidencias rozadas y la búsqueda relajada en páginas escaneadas.
 - **Rendimiento**: ~1 s por página en los planos más densos (un set de 74
   páginas tarda ~70 s).
+
+## Zonas, logos y OCR: casos encontrados (fase 5)
+
+Probado sobre los 6 sets con configs locales. Comprobación final como la haría
+un LLM con visión: OCR de las páginas de salida buscando los nombres reales.
+No queda ninguno de los que describen las reglas, y ninguna de las áreas
+borradas por OCR toca un dato protegido leído en la entrada.
+
+- **Tesseract en planos**: a 300 ppp lee mal el texto SHX pequeño; hace falta
+  ~600 ppp para un A1 (más si es un A1 reducido a A4, con tope de píxeles). El
+  texto vertical exige probar 90° **y** 270° (en una orientación sale en espejo).
+  Unos 3 s por orientación y página.
+- **OCR inestable**: al quitar texto cambia la segmentación de Tesseract y en
+  una segunda lectura aparecen palabras que antes leyó mal ("PREVIO" en vez de
+  la palabra real, o una palabra partida en dos líneas). Las páginas con
+  coincidencias se leen una segunda vez (`ocr.passes`).
+- **Logos apilados**: un logo con el nombre en dos líneas no encaja con un
+  término de dos palabras. Las coincidencias rozadas avisan ahora de la
+  primera palabra de los términos de varias palabras.
+- **Logos en imagen**: el mismo logo en color en unas páginas y en gris en
+  otras, y el mismo sello en tres variantes (una girada), se agrupan con el hash
+  perceptual. Un set tenía una máscara de 1 bit sin espacio de color que hacía
+  fallar la conversión: ahora se salta.
+- **Logos vectoriales** (símbolos, letras estilizadas) no son texto ni imagen:
+  hace falta una zona por plantilla. Lo mismo para nombres que las reglas no
+  describen: el motor solo quita lo que la config dice.
+- **Rendimiento**: ~8–16 s por página con OCR (un set escaneado de 68 páginas,
+  ~10 min); las páginas que no lo necesitan no lo pagan.

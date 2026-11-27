@@ -149,6 +149,33 @@ rozadas**: lo que una regla encontraría sin límites de palabra o de token
 El texto convertido a trazos sin capa de texto, los logos y las imágenes son
 cosa de la fase 5.
 
+## Zonas, logos y texto en trazos (fase 5)
+
+```bash
+uv run anonymize data/plano.pdf -o data/out/plano.pdf --config configs/<cliente>.yaml \
+    --report data/reports/plano.anon.json
+```
+
+Encadena, en este orden: zonas → logos → redacción de texto (fase 4) → OCR.
+
+- **Zonas** (bloque `zones`): se elimina todo lo que contienen, es decir
+  texto, píxeles de imagen y trazos que estén enteros dentro. Una línea que solo
+  entra en la zona, como el marco del plano, se conserva. `label` escribe una
+  etiqueta opcional en la zona vaciada. Los **logos vectoriales** se tratan
+  con zonas.
+- **Logos en imagen** (bloque `logos`): las imágenes se agrupan por un hash
+  perceptual, así que la misma imagen girada o en gris cuenta como una sola. Se
+  eliminan las que se repiten en 3 páginas o más y ocupan menos del 15 % de la
+  página, además de las fijadas en `logos.remove`. `logos.keep` excluye
+  imágenes. El informe da el hash de cada grupo.
+- **OCR** (bloque `ocr`): se aplica a las páginas con texto en trazos y a las
+  escaneadas, incluidas las que ya traen una capa OCR. Tesseract lee en 0°, 90°
+  y 270° (`eng+spa` por defecto; hace falta `brew install tesseract-lang`).
+  Las reglas se aplican con la lista blanca primero y los términos toleran
+  confusiones típicas del OCR (`0/O`, `1/I/l`, `5/S`, `8/B`). Cada
+  coincidencia se borra (trazos con el editor preciso, píxeles en
+  escaneados) y en su lugar se escribe la denominación genérica.
+
 ## Uso (previsto, fase 8)
 
 ```bash
