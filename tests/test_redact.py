@@ -55,7 +55,7 @@ def _streams(path: Path) -> bytes:
                 except pikepdf.PdfError:
                     out.append(obj.read_raw_bytes())
             elif isinstance(obj, (pikepdf.Dictionary, pikepdf.Array)):
-                out.append(obj.unparse())
+                out.append(obj.unparse(resolved=True))
     return b"\n".join(out)
 
 

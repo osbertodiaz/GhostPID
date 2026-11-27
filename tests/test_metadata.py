@@ -236,17 +236,17 @@ def _objects_blob(path: Path) -> bytes:
     """Todos los objetos del PDF, con los streams descomprimidos."""
     chunks = []
     with pikepdf.open(path) as pdf:
-        chunks.append(pdf.trailer.unparse())
+        chunks.append(pdf.trailer.unparse(resolved=True))
         for obj in pdf.objects:
             if isinstance(obj, pikepdf.Stream):
-                chunks.append(obj.stream_dict.unparse())
+                chunks.append(obj.stream_dict.unparse(resolved=True))
                 try:
                     chunks.append(obj.read_bytes())
                 except pikepdf.PdfError:
                     chunks.append(obj.read_raw_bytes())
             else:
                 try:
-                    chunks.append(obj.unparse())
+                    chunks.append(obj.unparse(resolved=True))
                 except Exception:  # objetos nulos o huérfanos
                     pass
     return b"\n".join(chunks)
