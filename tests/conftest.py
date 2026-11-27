@@ -6,6 +6,14 @@ import pytest
 from reportlab.lib.pagesizes import A3, landscape
 from reportlab.pdfgen import canvas
 
+
+
+@pytest.fixture(autouse=True)
+def _spanish_by_default(monkeypatch):
+    """Los tests comparan textos en español salvo que fuercen otro idioma."""
+    monkeypatch.setenv("PID_ANONYMOUSE_LANG", "es")
+
+
 # Texto mínimo con aspecto de P&ID: tags que deben conservarse
 SMOKE_LINES = [
     "P-101A CENTRIFUGAL PUMP",
