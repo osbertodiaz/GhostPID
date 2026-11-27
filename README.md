@@ -32,10 +32,18 @@ Inventario de solo lectura: metadatos Info y XMP, IDs del documento, adjuntos,
 anotaciones, capas (OCG), JavaScript, fuentes y tipo de cada página (texto
 vectorial, solo imagen, imagen con capa de texto, solo trazos).
 
-También estima el **texto convertido a trazos** (típico de AutoCAD con fuentes
-SHX, donde los tags de un P&ID no están en la capa de texto): agrupa paths con
-tamaño de letra alineados en la misma línea base. Las páginas con 50 glifos o
-más se marcan como "texto en trazos" y cuentan como "requiere OCR".
+También detecta:
+
+- **Texto convertido a trazos o contornos** (AutoCAD con SHX, PostScript): agrupa
+  paths con tamaño de letra alineados. Las páginas con 50 glifos o más cuentan
+  como "requiere OCR". Los umbrales se escalan con el tamaño de página.
+- **Texto invisible**: capas OCR de escaneados y el texto que AutoCAD superpone
+  a los trazos SHX.
+- **Imágenes repetidas** (agrupadas por hash de contenido): candidatas a logo.
+- **Títulos de marcadores**, que suelen contener nombres internos.
+
+Los patrones encontrados en P&ID reales están en
+[docs/corpus-pid.md](docs/corpus-pid.md).
 
 ```bash
 uv run inventory data/ --out data/reports --json
