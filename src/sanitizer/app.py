@@ -195,9 +195,16 @@ class StartDialog(QDialog):
         form.addRow(tr("Pasadas de autocorrección:", "Self-repair passes:"), self.repair)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Open | QDialogButtonBox.StandardButton.Cancel)
+        self.about_btn = buttons.addButton(tr("Acerca de y licencias…", "About and licenses…"), QDialogButtonBox.ButtonRole.HelpRole)
+        self.about_btn.clicked.connect(self._show_about)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+
+    def _show_about(self) -> None:
+        from sanitizer.about import AboutDialog
+
+        AboutDialog(self).exec()
 
     def _load_configs(self, select: Path | None = None) -> None:
         self.config.clear()
@@ -314,6 +321,13 @@ def self_test() -> int:
         doc.save(Path(tmp) / "x.pdf")
     if "P-101A" not in text:
         print("FALLO: el OCR no leyó el texto de prueba")
+        return 1
+    from sanitizer import licenses
+
+    found = {name: licenses.find_file(name) for name in (licenses.LICENSE_FILE, licenses.NOTICES_FILE, licenses.TEXTS_FILE)}
+    print("licencias:", {k: str(v) if v else None for k, v in found.items()})
+    if getattr(sys, "frozen", False) and not all(found.values()):
+        print("FALLO: faltan ficheros de licencia en el paquete")
         return 1
     print("ok")
     return 0

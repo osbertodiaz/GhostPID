@@ -408,6 +408,8 @@ class ReviewWindow(QMainWindow):
         self.refresh_action = bar.addAction(tr("Recalcular", "Recalculate"), lambda: self.run_preview(ocr=False))
         self.ocr_action = bar.addAction(tr("Con OCR", "With OCR"), lambda: self.run_preview(ocr=True))
         self.generate_action = bar.addAction(tr("Confirmar y generar", "Confirm and generate"), self.on_generate)
+        bar.addSeparator()
+        self.about_action = bar.addAction(tr("Acerca de y licencias…", "About and licenses…"), self.show_about)
 
         self.view = PageView()
         self.view.zone_drawn.connect(self.on_zone_drawn)
@@ -763,6 +765,11 @@ class ReviewWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._guard(lambda: self.create_zone(view_rect, dialog.pages_value(), dialog.label.text(), dialog.description.text()))
         self.zone_action.setChecked(False)
+
+    def show_about(self) -> None:
+        from sanitizer.about import AboutDialog
+
+        AboutDialog(self).exec()
 
     def on_generate(self) -> None:
         note = tr("\n\nOjo: hay cambios en la config que aún no has recalculado.", "\n\nNote: there are config changes you have not recalculated yet.") if self.stale else ""

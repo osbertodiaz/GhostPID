@@ -13,6 +13,8 @@ Anonymization is **deterministic** (rules, regex and coordinates). No LLM is
 used to redact. Every redaction removes the real text with
 `apply_redactions`; covering it up is not enough.
 
+> **Download for Windows**: [latest release](https://github.com/osbertodiaz/GhostPID/releases/latest) (`GhostPID-windows-x64.zip`, no installation needed)
+>
 > **User manual** (installation, review app, rules and common problems): [docs/MANUAL.en.md](docs/MANUAL.en.md) · Español: [docs/MANUAL.md](docs/MANUAL.md)
 
 ## Language
@@ -409,6 +411,18 @@ data/            real PDFs and substitution maps (outside git)
 
 `data/` is in `.gitignore`. Real PDFs and substitution maps are never
 committed. Tests only use synthetic PDFs.
+
+## License
+
+GhostPID's code is released under the [MIT License](LICENSE).
+
+It uses third-party components under their own licenses. The downloadable
+desktop app bundles PyMuPDF/MuPDF (AGPL-3.0) and PyQt6 (GPL-3.0), so the
+bundled app, as a combined work, is distributed under the terms of the GNU
+AGPL-3.0, and its complete source code is this repository. The list of
+components and their licenses is in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The app shows it under
+**About and licenses…**, and carries the full texts in `licenses/`.
 
 ## Roadmap
 

@@ -12,6 +12,8 @@ La anonimización es **determinista** (reglas, regex y coordenadas). No se usa
 ningún LLM para redactar. Toda redacción elimina el texto real con
 `apply_redactions`; no basta con taparlo.
 
+> **Descargar para Windows**: [última versión](https://github.com/osbertodiaz/GhostPID/releases/latest) (`GhostPID-windows-x64.zip`, no requiere instalación)
+>
 > **Manual de uso** (instalación, app de revisión, reglas y problemas frecuentes): [docs/MANUAL.md](docs/MANUAL.md) · English: [docs/MANUAL.en.md](docs/MANUAL.en.md)
 
 ## Idioma
@@ -412,6 +414,18 @@ data/            PDFs reales y mapas de sustitución (fuera de git)
 
 `data/` está en `.gitignore`. Nunca se commitean PDFs reales ni mapas de
 sustitución. Los tests solo usan PDFs sintéticos.
+
+## Licencia
+
+El código de GhostPID se publica con la [licencia MIT](LICENSE).
+
+Usa componentes de terceros con sus propias licencias. La app de escritorio
+descargable incluye PyMuPDF/MuPDF (AGPL-3.0) y PyQt6 (GPL-3.0), así que la app
+empaquetada, como obra combinada, se distribuye bajo los términos de la GNU
+AGPL-3.0, y su código fuente completo es este repositorio. La lista de
+componentes y sus licencias está en
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). La app lo muestra en
+**Acerca de y licencias…**, y lleva los textos completos en `licenses/`.
 
 ## Roadmap
 

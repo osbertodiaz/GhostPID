@@ -27,5 +27,11 @@ Idioma: la app sale en español si Windows está en español y en inglés en
 cualquier otro caso. Para forzarlo, define la variable de entorno
 GHOSTPID_LANG=es (o en).
 
+Licencia: el código de GhostPID es MIT (LICENSE.txt). La app incluye
+componentes de terceros, entre ellos PyMuPDF (AGPL-3.0) y PyQt6 (GPL-3.0),
+por lo que este paquete se distribuye bajo la GNU AGPL-3.0; el código fuente
+completo está en la dirección de abajo. Detalle y textos completos en la
+carpeta licenses\ y en la app, con "Acerca de y licencias…".
+
 Manual completo: MANUAL.md (en esta carpeta). English: MANUAL.en.md.
 Código y documentación: https://github.com/osbertodiaz/GhostPID
