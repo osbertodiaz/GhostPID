@@ -176,6 +176,32 @@ Encadena, en este orden: zonas → logos → redacción de texto (fase 4) → OC
   coincidencia se borra (trazos con el editor preciso, píxeles en
   escaneados) y en su lugar se escribe la denominación genérica.
 
+## Mapa de sustitución y reversión (fase 6)
+
+```bash
+uv run anonymize data/plano.pdf -o data/out/plano.pdf --config configs/<cliente>.yaml \
+    --map data/maps/<proyecto>.map.json
+uv run revert --map data/maps/<proyecto>.map.json respuesta_llm.txt > respuesta.txt
+```
+
+- El mapa guarda, por cada denominación genérica, los originales que
+  sustituye, junto con su regla, su categoría y cuántas veces aparecieron (y
+  cuántas se leyeron del texto real y no por OCR). Incluye además el SHA-256 de
+  cada PDF original y anonimizado.
+- **Solo se guarda dentro de `data/`**, con permisos 600: el código se niega a
+  escribirlo en otro sitio, y lo comprueba antes de empezar a trabajar.
+- Si se pasa el mismo `--map` al anonimizar otro PDF, la numeración se
+  reutiliza: `VENDOR-1` es el mismo fabricante en todo el proyecto.
+- `revert` cambia cada denominación por su original: de la más larga a la más
+  corta, sin distinguir mayúsculas y solo palabras completas. Si una
+  denominación agrupa varias entidades distintas (p. ej. `SITE` para varias
+  ubicaciones), usa la más frecuente leída del texto real y avisa.
+  `validate-config` advierte de esas reglas: para que la reversión sea exacta,
+  usa `{n}` en `replacement`.
+- Denominaciones como `EPC` también son siglas comunes: si un LLM las usa con
+  ese sentido, `revert` las cambiará igualmente. Para evitarlo, usa algo
+  inequívoco en la config (p. ej. `[EPC]`).
+
 ## Uso (previsto, fase 8)
 
 ```bash

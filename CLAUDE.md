@@ -22,6 +22,8 @@ Python 3.12, uv, PyMuPDF, pikepdf, pdfplumber, OpenCV, pytesseract, pyyaml, pyte
 - Redacción: `uv run redact <pdf> -o <salida> --config … [--report data/reports/x.json]`
 - Fases 4+5 (zonas, logos, texto, OCR): `uv run anonymize <pdf> -o <salida> --config … [--report …]`
 - OCR necesita `brew install tesseract tesseract-lang`
+- Mapa: `anonymize … --map data/maps/<proyecto>.map.json`; reversión: `uv run revert --map … [fichero]`
+- Los mapas contienen valores originales: solo en data/ (save_map lo impone)
 
 ## Flexibilidad
 - Los sets de `data/` son solo ejemplos: no sobreajustar a ellos. Todo umbral va en un dataclass de parámetros configurable desde el bloque `detection` del YAML.
