@@ -11,6 +11,7 @@ Una config tiene cuatro bloques:
   laterales, logos), en fracción de página o en milímetros.
 - `detection`: umbrales de los detectores de diagnóstico, por si un set de
   planos se sale de lo calibrado.
+- `metadata`: qué hacer con anotaciones, enlaces, capas y marcadores.
 
 Las configs pueden heredar de otra con `extends` (ruta relativa al fichero).
 Al heredar:
@@ -18,7 +19,7 @@ Al heredar:
 - Las reglas y zonas se combinan por `id`: si el hijo repite un `id`, sus
   claves sobrescriben las del padre (p. ej. añadir `exceptions` a una regla
   base sin repetir su patrón); si no, se añaden.
-- `detection` se combina clave a clave.
+- `detection` y `metadata` se combinan clave a clave.
 - `disable: [id, …]` quita reglas o zonas heredadas.
 
 Cada regla lleva ejemplos. Sirven para validar las regex y para detectar
@@ -45,6 +46,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from sanitizer.inventory import DetectionParams
+from sanitizer.metadata import MetadataPolicy
 
 SCHEMA_VERSION = 1
 
@@ -340,6 +342,7 @@ class Config(_Strict):
     substitutions: list[SubstitutionRule] = Field(default_factory=list)
     zones: list[Zone] = Field(default_factory=list)
     detection: DetectionParams = Field(default_factory=DetectionParams)
+    metadata: MetadataPolicy = Field(default_factory=MetadataPolicy)
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Config:
@@ -411,7 +414,7 @@ def _merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
     for key, value in child.items():
         if key in _RULE_BLOCKS and isinstance(value, list) and isinstance(out.get(key), list):
             out[key] = _merge_rules(out[key], value)
-        elif key == "detection" and isinstance(value, dict) and isinstance(out.get(key), dict):
+        elif key in ("detection", "metadata") and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], value)
         else:
             out[key] = value
