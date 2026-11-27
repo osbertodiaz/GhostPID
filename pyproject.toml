@@ -18,6 +18,7 @@ dependencies = [
 sanitize = "sanitizer.cli:main"
 inventory = "sanitizer.inventory:main"
 validate-config = "sanitizer.rules:main"
+clean-metadata = "sanitizer.metadata:main"
 
 [dependency-groups]
 dev = [
