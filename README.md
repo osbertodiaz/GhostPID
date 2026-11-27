@@ -10,6 +10,8 @@ La anonimización es **determinista** (reglas, regex y coordenadas). No se usa
 ningún LLM para redactar. Toda redacción elimina el texto real con
 `apply_redactions`; no basta con taparlo.
 
+> **Manual de uso** (instalación, app de revisión, reglas y problemas frecuentes): [docs/MANUAL.md](docs/MANUAL.md)
+
 ## Requisitos
 
 - macOS (probado en Apple Silicon), Python 3.12
