@@ -477,7 +477,9 @@ class ReviewWindow(QMainWindow):
             self.anonymized.close()
             self.anonymized = None
         if state is not None and state.anonymized is not None and state.anonymized.exists():
-            self.anonymized = pymupdf.open(state.anonymized)
+            # En memoria: un PDF abierto queda bloqueado en Windows y la
+            # siguiente vista previa no podría sobrescribirlo
+            self.anonymized = pymupdf.open(stream=state.anonymized.read_bytes(), filetype="pdf")
         self.report_btn.setEnabled(self._report_path().exists())
         self._update_status()
         self._show_page()

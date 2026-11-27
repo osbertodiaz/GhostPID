@@ -95,7 +95,8 @@ def test_map_is_only_saved_inside_data(tmp_path):
     with pytest.raises(MapError, match="solo se guarda dentro de data/"):
         save_map(empty_map(), tmp_path / "maps" / "x.map.json")
     path = save_map(empty_map(), tmp_path / "data" / "maps" / "x.map.json")
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name == "posix":  # en Windows chmod solo controla el atributo de solo lectura
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     assert load_map(path) == empty_map()
 
 
