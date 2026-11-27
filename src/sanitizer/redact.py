@@ -151,6 +151,10 @@ class RedactionReport:
     stacked_tags: int = 0
     # denominación genérica → valores originales (base del mapa de la fase 6)
     mapping: dict[str, list[str]] = field(default_factory=dict)
+    # Fase 5: zonas eliminadas, grupos de imágenes (logos) y OCR por página
+    zones: list[dict[str, Any]] = field(default_factory=list)
+    logos: list[dict[str, Any]] = field(default_factory=list)
+    ocr: dict[int, dict[str, Any]] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
     # Avisos que no son fugas (p. ej. trazos borrados de más)
     warnings: list[str] = field(default_factory=list)
@@ -206,6 +210,16 @@ def normalize(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
+# Confusiones típicas del OCR: se normalizan igual en el texto y en el término
+_OCR_CONFUSIONS = str.maketrans({"0": "O", "1": "I", "L": "I", "|": "I", "!": "I", "5": "S", "8": "B"})
+
+
+def ocr_normalize(text: str) -> str:
+    """Mayúsculas y confusiones de OCR unificadas, conservando la longitud."""
+    upper = "".join(c.upper() if len(c.upper()) == 1 else c for c in text)
+    return upper.translate(_OCR_CONFUSIONS)
+
+
 @dataclass(frozen=True)
 class Match:
     start: int
@@ -218,8 +232,12 @@ def find_matches(
     text: str,
     extra_protected: list[tuple[int, int, str]] = (),
     relaxed: bool = False,
+    fuzzy: bool = False,
 ) -> tuple[list[Match], list[tuple[int, int, Any, str]]]:
     """Coincidencias de sustitución aceptadas y bloqueadas en `text`.
+
+    `relaxed`: los términos encajan también dentro de otras palabras.
+    `fuzzy` (texto de OCR): los términos se comparan tras `ocr_normalize`.
 
     Entre coincidencias que se solapan gana la que empieza antes y, a igualdad,
     la más larga. Una coincidencia que toca un tramo protegido se bloquea.
@@ -227,10 +245,20 @@ def find_matches(
     protected = [(m.start(), m.end(), wl.id) for wl in config.whitelist for m in wl.regex.finditer(text)]
     protected += list(extra_protected)
 
+    from sanitizer.rules import term_regex  # rules importa este módulo
+
+    normalized = ocr_normalize(text) if fuzzy else None
     candidates = []
     for order, rule in enumerate(config.substitutions):
-        for rx in rule.relaxed_matchers if relaxed else rule.matchers:
-            for m in rx.finditer(text):
+        if fuzzy:
+            searches = [
+                (re.compile(term_regex(ocr_normalize(t), word_boundaries=not relaxed)), normalized)
+                for t in rule.terms
+            ] + [(rx, text) for rx in rule.pattern_regexes]
+        else:
+            searches = [(rx, text) for rx in (rule.relaxed_matchers if relaxed else rule.matchers)]
+        for rx, haystack in searches:
+            for m in rx.finditer(haystack):
                 if m.end() > m.start():
                     candidates.append((m.start(), -(m.end() - m.start()), order, m.end(), rule))
     candidates.sort(key=lambda c: c[:3])
@@ -250,13 +278,24 @@ def find_matches(
 
 
 def near_misses(config: Any, text: str, accepted: list[Match]) -> list[tuple[str, Any]]:
-    """Coincidencias de términos y patrones sin límites que no se han sustituido."""
+    """Coincidencias "rozadas" que no se han sustituido.
+
+    Términos y patrones sin límites de palabra o de token, y la primera
+    palabra de los términos de varias palabras.
+    """
     from sanitizer.rules import term_regex  # rules importa este módulo
 
     out = []
     for rule in config.substitutions:
         flags = 0 if rule.case_sensitive else re.IGNORECASE
         raw = [term_regex(t, word_boundaries=False) for t in rule.terms]
+        # Términos de varias palabras que aparecen solo en parte (p. ej. un logo
+        # que apila "ACME" sobre "ENGINEERING"): se avisa por la primera palabra
+        raw += [
+            term_regex(t.split()[0])
+            for t in rule.terms
+            if len(t.split()) > 1 and len(t.split()[0]) >= 4
+        ]
         if rule.boundary == "token":
             raw += rule.patterns
         for pattern in raw:
@@ -507,32 +546,19 @@ def _apply_page(
     # 3) Los trazos bajo el texto (p. ej. letras SHX) se quitan después, con
     #    precisión, editando el stream de contenido (ver lineart.py)
 
-    color = (1, 1, 1) if policy.fill == "black" else (0, 0, 0)
     for item in planned:
-        text = item.replacement.replacement
-        if not text or item.origin is None:
-            continue
-        dx, dy = item.direction
-        angle = math.degrees(math.atan2(-dy, dx)) % 360
-        first = item.full_rects[0]
-        vertical = abs(angle % 180 - 90) < 45
-        available = first.height if vertical else first.width
-        size = item.font_size or 8.0
-        length = pymupdf.get_text_length(text, fontname=policy.font, fontsize=size)
-        if length > available > 0:
-            size *= available / length
-        size = max(size, policy.min_font_size)
-        # La sustitución de un texto oculto va también a una capa oculta
-        kwargs = {"fontsize": size, "fontname": policy.font, "color": color}
-        if item.hidden and hidden_ocg:
-            kwargs["oc"] = hidden_ocg
-        snapped = round(angle / 90) * 90 % 360
-        if min(abs(angle - snapped), 360 - abs(angle - snapped)) < 1:
-            page.insert_text(item.origin, text, rotate=snapped, **kwargs)
-        else:
-            # Texto inclinado: se gira alrededor del origen
-            morph = (pymupdf.Point(item.origin), pymupdf.Matrix(-angle))
-            page.insert_text(item.origin, text, morph=morph, **kwargs)
+        if item.origin is not None:
+            # La sustitución de un texto oculto va también a una capa oculta
+            insert_replacement(
+                page,
+                item.replacement.replacement,
+                item.origin,
+                item.direction,
+                item.font_size,
+                item.full_rects[0],
+                policy,
+                oc=hidden_ocg if item.hidden else None,
+            )
 
     if mode.graphics == "none":
         return []
@@ -543,6 +569,48 @@ def _apply_page(
             r = (rect * to_pdf).normalize()
             areas.append((r.x0, r.y0, r.x1, r.y1))
     return areas
+
+
+def insert_replacement(
+    page: pymupdf.Page,
+    text: str,
+    origin: tuple[float, float],
+    direction: tuple[float, float],
+    font_size: float,
+    area: pymupdf.Rect,
+    policy: RedactionPolicy,
+    oc: int | None = None,
+) -> None:
+    """Escribe la denominación genérica en el sitio del original.
+
+    Coordenadas de página sin rotar (las de get_text). El texto sigue la
+    dirección del original y se encoge si no cabe en el área.
+    """
+    if not text:
+        return
+    dx, dy = direction
+    angle = math.degrees(math.atan2(-dy, dx)) % 360
+    vertical = abs(angle % 180 - 90) < 45
+    available = area.height if vertical else area.width
+    size = font_size or 8.0
+    length = pymupdf.get_text_length(text, fontname=policy.font, fontsize=size)
+    if length > available > 0:
+        size *= available / length
+    size = max(size, policy.min_font_size)
+    kwargs = {
+        "fontsize": size,
+        "fontname": policy.font,
+        "color": (1, 1, 1) if policy.fill == "black" else (0, 0, 0),
+    }
+    if oc:
+        kwargs["oc"] = oc
+    snapped = round(angle / 90) * 90 % 360
+    if min(abs(angle - snapped), 360 - abs(angle - snapped)) < 1:
+        page.insert_text(origin, text, rotate=snapped, **kwargs)
+    else:
+        # Texto inclinado: se gira alrededor del origen
+        morph = (pymupdf.Point(origin), pymupdf.Matrix(-angle))
+        page.insert_text(origin, text, morph=morph, **kwargs)
 
 
 # --------------------------------------------------------------------------
@@ -636,6 +704,173 @@ def _without_annotations(doc: pymupdf.Document) -> pymupdf.Document:
 # --------------------------------------------------------------------------
 
 
+class Session:
+    """PDF en proceso de anonimización.
+
+    Se abre con todas las capas visibles (para ver el texto oculto) y se va
+    modificando por etapas: zonas, logos, texto, OCR. Los trazos que hay que
+    quitar se acumulan y se eliminan con pikepdf en `flush_line_art`.
+
+    Orden obligado: `snapshot()` antes de cambiar nada; `redact_text()` antes
+    de `restore_layers()`; el OCR, después de `flush_line_art()`, para que no
+    vuelva a encontrar lo que ya se ha quitado.
+    """
+
+    def __init__(
+        self,
+        src: str | Path,
+        config: Any,
+        policy: RedactionPolicy | None = None,
+        detection: DetectionParams | None = None,
+    ) -> None:
+        self.src = Path(src)
+        self.config = config
+        self.policy = policy or config.redaction
+        self.detection = detection or config.detection
+        self.report = RedactionReport()
+        self.namer = Namer()
+        self.doc, self.layer_state = _open_with_all_layers(self.src, self.policy)
+        self.layers_restored = self.layer_state is None
+        self.line_art: dict[int, list[tuple[list, bool]]] = collections.defaultdict(list)
+        self.protected_before: dict[int, collections.Counter] = {}
+        # Rectángulos (coordenadas de página) donde se permite perder datos
+        # protegidos: las zonas se eliminan enteras
+        self.cleared: dict[int, list[pymupdf.Rect]] = collections.defaultdict(list)
+
+    def close(self) -> None:
+        self.doc.close()
+
+    def __enter__(self) -> "Session":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    # -- etapas -------------------------------------------------------------
+
+    def snapshot(self) -> None:
+        """Datos protegidos por página antes de tocar nada (salvaguarda final)."""
+        with _without_annotations(self.doc) as plain:
+            for page in plain:
+                self.protected_before[page.number + 1] = _protected_counts(page, self.config)
+
+    def redact_text(self) -> None:
+        """Fase 4: texto de páginas, capas ocultas, anotaciones y formularios."""
+        config, policy, report = self.config, self.policy, self.report
+        plain = _without_annotations(self.doc)
+        # Lo que se ve con las capas en su estado original, para saber qué
+        # coincidencias están en contenido oculto
+        original = _without_annotations(pymupdf.open(self.src)) if self.layer_state is not None else None
+
+        # 1) Planificar todas las páginas antes de tocar ninguna
+        plans = []
+        for page in plain:
+            mode = page_mode(page, self.detection)
+            report.page_modes[page.number + 1] = mode
+            visible = _visible_chars(original[page.number]) if original is not None else None
+            relaxed = policy.ocr_relaxed_terms and mode == "scanned"
+            plans.append((page.number, mode, _plan_page(page, config, policy, self.namer, report, visible, relaxed)))
+        plain.close()
+        if original is not None:
+            original.close()
+
+        hidden_ocg = None
+        if any(item.hidden for _, _, planned in plans for item in planned):
+            hidden_ocg = self.doc.add_ocg("redacted-hidden", on=False)
+            if self.layer_state is not None:
+                off = [*(self.layer_state.get("off") or []), hidden_ocg]
+                self.layer_state = {**self.layer_state, "off": off}
+
+        # 2) Redactar e insertar las denominaciones genéricas
+        for number, mode, planned in plans:
+            page = self.doc[number]
+            if planned:
+                page_mode_cfg = getattr(policy, mode)
+                areas = _apply_page(page, planned, page_mode_cfg, policy, hidden_ocg)
+                if areas:
+                    self.add_line_art(number, areas, page_mode_cfg.graphics == "touched")
+                report.replacements += [p.replacement for p in planned]
+            if policy.annotations:
+                _process_annotations(page, config, self.namer, report)
+
+    def add_line_art(self, page_index: int, areas: list, touched: bool = False) -> None:
+        """Áreas (espacio PDF) cuyos trazos hay que quitar de la página."""
+        self.line_art[page_index].append((areas, touched))
+
+    def restore_layers(self) -> None:
+        if not self.layers_restored:
+            _restore_layers(self.doc, self.layer_state)
+            self.layers_restored = True
+
+    def flush_line_art(self) -> None:
+        """Quita los trazos pendientes con pikepdf y reabre el documento.
+
+        pikepdf renumera los objetos, así que antes se restaura el estado de
+        las capas (sus referencias dejarían de ser válidas).
+        """
+        if not self.line_art:
+            return
+        self.restore_layers()
+        with pikepdf.open(io.BytesIO(self.doc.tobytes(garbage=1, deflate=True))) as pdf:
+            for number, jobs in sorted(self.line_art.items()):
+                for areas, touched in jobs:
+                    result = remove_paths(pdf, number, areas, touched)
+                    if result.xobject_paths:
+                        self.report.warnings.append(
+                            f"página {number + 1}: hay trazos dentro de Form XObjects que no se "
+                            f"han revisado (revisa visualmente el resultado)"
+                        )
+            buf = io.BytesIO()
+            pdf.save(buf)
+        self.doc.close()
+        self.doc = pymupdf.open("pdf", buf.getvalue())
+        self.line_art.clear()
+
+    def view(self) -> pymupdf.Document:
+        """Copia tal como se ve: capas en su estado guardado y sin anotaciones."""
+        self.restore_layers()
+        return _without_annotations(self.doc)
+
+    def save(self, dst: str | Path) -> None:
+        dst = Path(dst)
+        if self.src.resolve() == dst.resolve():
+            raise ValueError("la salida no puede sobrescribir el PDF original")
+        self.restore_layers()
+        self.flush_line_art()
+        self.doc.save(dst, garbage=3, deflate=True)
+        self.report.mapping = self.namer.mapping
+
+    def verify(self, dst: str | Path) -> None:
+        """Relee la salida: coincidencias que sigan ahí y datos protegidos perdidos."""
+        self.report.problems = verify_redaction(dst, self.config, self.policy, self.detection)
+        after_doc, _ = _open_with_all_layers(Path(dst), self.policy)
+        with after_doc, _without_annotations(after_doc) as plain_after:
+            for page in plain_after:
+                number = page.number + 1
+                excluded = self.cleared.get(number, [])
+                before = self.protected_before.get(number, collections.Counter())
+                lost = before - _protected_counts(page, self.config)
+                if lost and excluded:
+                    # Lo que estaba dentro de una zona se elimina a propósito
+                    lost -= collections.Counter(self._protected_in(number, excluded))
+                if lost:
+                    items = ", ".join(f"'{k}'" + (f" ×{v}" if v > 1 else "") for k, v in lost.items())
+                    self.report.warnings.append(f"página {number}: se han perdido datos protegidos: {items}")
+
+    def _protected_in(self, number: int, rects: list[pymupdf.Rect]) -> list[str]:
+        """Datos protegidos del original que caían dentro de `rects`."""
+        found = []
+        with pymupdf.open(self.src) as original, _without_annotations(original) as plain:
+            page = plain[number - 1]
+            for text, chars in _blocks(page):
+                for wl in self.config.whitelist:
+                    for m in wl.regex.finditer(text):
+                        boxes = [c.bbox for c in chars[m.start() : m.end()] if c.bbox is not None]
+                        if boxes and any(r.intersects(b) for r in rects for b in boxes):
+                            found.append(m.group(0))
+        return found
+
+
 def redact_pdf(
     src: str | Path,
     dst: str | Path,
@@ -643,87 +878,15 @@ def redact_pdf(
     policy: RedactionPolicy | None = None,
     detection: DetectionParams | None = None,
 ) -> RedactionReport:
-    """Redacta `src` según `config` y guarda el resultado en `dst`."""
-    src, dst = Path(src), Path(dst)
-    if src.resolve() == dst.resolve():
+    """Fase 4 sola: redacta el texto de `src` y guarda el resultado en `dst`."""
+    if Path(src).resolve() == Path(dst).resolve():
         raise ValueError("la salida no puede sobrescribir el PDF original")
-    policy = policy or config.redaction
-    detection = detection or config.detection
-
-    report = RedactionReport()
-    namer = Namer()
-    doc, layer_state = _open_with_all_layers(src, policy)
-    try:
-        plain = _without_annotations(doc)
-        # Lo que se ve con las capas en su estado original, para saber qué
-        # coincidencias están en contenido oculto
-        original = _without_annotations(pymupdf.open(src)) if layer_state is not None else None
-
-        # 1) Planificar todas las páginas antes de tocar ninguna
-        plans = []
-        protected_before: dict[int, collections.Counter] = {}
-        for page in plain:
-            mode = page_mode(page, detection)
-            report.page_modes[page.number + 1] = mode
-            visible = _visible_chars(original[page.number]) if original is not None else None
-            relaxed = policy.ocr_relaxed_terms and mode == "scanned"
-            plans.append(
-                (page.number, mode, _plan_page(page, config, policy, namer, report, visible, relaxed))
-            )
-            protected_before[page.number + 1] = _protected_counts(page, config)
-        plain.close()
-        if original is not None:
-            original.close()
-
-        hidden_ocg = None
-        if any(item.hidden for _, _, planned in plans for item in planned):
-            hidden_ocg = doc.add_ocg("redacted-hidden", on=False)
-            if layer_state is not None:
-                layer_state = {**layer_state, "off": [*(layer_state.get("off") or []), hidden_ocg]}
-
-        # 2) Redactar e insertar las denominaciones genéricas
-        line_art: dict[int, tuple[list, bool]] = {}
-        for number, mode, planned in plans:
-            page = doc[number]
-            if planned:
-                page_mode_cfg = getattr(policy, mode)
-                areas = _apply_page(page, planned, page_mode_cfg, policy, hidden_ocg)
-                if areas:
-                    line_art[number] = (areas, page_mode_cfg.graphics == "touched")
-                report.replacements += [p.replacement for p in planned]
-            if policy.annotations:
-                _process_annotations(page, config, namer, report)
-
-        _restore_layers(doc, layer_state)
-        if not line_art:
-            doc.save(dst, garbage=3, deflate=True)
-        else:
-            # 3) Trazos bajo el texto redactado, editando el contenido con pikepdf
-            with pikepdf.open(io.BytesIO(doc.tobytes(garbage=3, deflate=True))) as pdf:
-                for number, (areas, touched) in line_art.items():
-                    result = remove_paths(pdf, number, areas, touched)
-                    if result.xobject_paths:
-                        report.warnings.append(
-                            f"página {number + 1}: hay trazos dentro de Form XObjects que no se "
-                            f"han revisado (revisa visualmente el resultado)"
-                        )
-                pdf.save(dst)
-    finally:
-        doc.close()
-
-    report.mapping = namer.mapping
-    report.problems = verify_redaction(dst, config, policy, detection)
-
-    # Salvaguarda: ningún dato protegido por la lista blanca debe desaparecer
-    after_doc, _ = _open_with_all_layers(dst, policy)
-    with after_doc:
-        with _without_annotations(after_doc) as plain_after:
-            for page in plain_after:
-                lost = protected_before.get(page.number + 1, collections.Counter()) - _protected_counts(page, config)
-                if lost:
-                    items = ", ".join(f"'{k}'" + (f" ×{v}" if v > 1 else "") for k, v in lost.items())
-                    report.warnings.append(f"página {page.number + 1}: se han perdido datos protegidos: {items}")
-    return report
+    with Session(src, config, policy, detection) as session:
+        session.snapshot()
+        session.redact_text()
+        session.save(dst)
+    session.verify(dst)
+    return session.report
 
 
 def _protected_counts(page: pymupdf.Page, config: Any) -> collections.Counter:
