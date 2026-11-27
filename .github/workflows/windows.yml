@@ -58,6 +58,7 @@ jobs:
           Copy-Item docs\MANUAL.md "dist\GhostPID\MANUAL.md"
           Copy-Item scripts\README-windows.txt "dist\GhostPID\README.txt"
           Copy-Item docs\MANUAL.en.md "dist\GhostPID\MANUAL.en.md"
+          Copy-Item LICENSE "dist\GhostPID\LICENSE.txt"
           $name = "GhostPID-windows-x64.zip"
           Compress-Archive -Path "dist\GhostPID" -DestinationPath $name
           "ZIP=$name" | Out-File -FilePath $env:GITHUB_ENV -Append

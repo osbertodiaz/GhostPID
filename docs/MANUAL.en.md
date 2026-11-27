@@ -380,3 +380,21 @@ locations. `revert` is only available from the command line.
   stamp, a scanned signature or a photo, cover it with a zone.
 - What the tool does not know, it cannot remove: keep each client's config
   up to date.
+
+---
+
+## 9. License
+
+GhostPID is free software: its code is released under the MIT License. The
+downloadable app bundles third-party components under their own licenses,
+including PyMuPDF (AGPL-3.0) and PyQt6 (GPL-3.0), so the bundled app is
+distributed under the terms of the GNU AGPL-3.0. The complete source code is
+at <https://github.com/osbertodiaz/GhostPID>.
+
+In the app, **About and licenses…** (in the start dialog and in the review
+window's toolbar) shows the version, the MIT License, the list of
+third-party components and the full text of their licenses. In the Windows
+zip they are also in the `licenses\` folder.
+
+It is provided as is, without warranty of any kind: always check the result
+before sharing a document.

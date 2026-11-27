@@ -5,6 +5,11 @@
 - Windows: `dist/GhostPID/` (carpeta con el .exe). Con `--tesseract
   <carpeta>` se copia dentro tesseract con los idiomas eng, spa y osd, para
   una descarga que no necesita instalar nada más.
+- Licencias: la app lleva `LICENSE` y `THIRD_PARTY_NOTICES.md`, y junto al
+  ejecutable se escribe `licenses/THIRD_PARTY_LICENSES.txt` con el texto
+  completo de las licencias de lo que PyInstaller incluyó (en macOS, en
+  `dist/licenses/`, para no tocar el .app firmado). Si se incluye un paquete
+  que THIRD_PARTY_NOTICES.md no menciona, el build falla.
 
 Uso: `uv run python scripts/build_app.py [--tesseract "C:/Program Files/Tesseract-OCR"]`
 """
@@ -17,7 +22,11 @@ import shutil
 import sys
 from pathlib import Path
 
+import re
+
 import PyInstaller.__main__
+
+from sanitizer import licenses
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = "GhostPID"
@@ -48,6 +57,10 @@ def build() -> Path:
         f"{ROOT / 'configs' / 'example.yaml'}{sep}configs",
         "--add-data",
         f"{ROOT / 'configs' / 'blacklist' / 'industria.csv'}{sep}configs/blacklist",
+        "--add-data",
+        f"{ROOT / licenses.LICENSE_FILE}{sep}{licenses.LICENSES_DIR}",
+        "--add-data",
+        f"{ROOT / licenses.NOTICES_FILE}{sep}{licenses.LICENSES_DIR}",
         "--exclude-module",
         "cv2",
         "--exclude-module",
@@ -77,6 +90,32 @@ def bundle_tesseract(app_dir: Path, source: Path) -> None:
         shutil.copyfile(data, target / "tessdata" / data.name)
 
 
+def bundled_modules() -> set[str]:
+    """Módulos de primer nivel que PyInstaller metió en la app (de sus TOC)."""
+    work = ROOT / "build" / "pyinstaller" / NAME
+    text = "".join(p.read_text(encoding="utf-8", errors="replace") for p in work.glob("*.toc"))
+    return set(re.findall(r"\(\s*'([A-Za-z0-9_]+)[./'\\]", text))
+
+
+def write_licenses(app: Path, tesseract: Path | None) -> Path:
+    """Textos completos de las licencias de lo incluido, junto al ejecutable."""
+    dists = licenses.bundled(licenses.runtime_distributions(), bundled_modules())
+    notices = (ROOT / licenses.NOTICES_FILE).read_text(encoding="utf-8")
+    missing = licenses.missing_from_notices(dists, notices)
+    if missing:
+        raise SystemExit(f"{licenses.NOTICES_FILE} no menciona: {', '.join(missing)}")
+    folder = (app.parent if sys.platform == "darwin" else app) / licenses.LICENSES_DIR
+    extra = []
+    if tesseract is not None:
+        found = [p for p in tesseract.rglob("*") if p.is_file() and re.match(r"(LICEN[CS]E|COPYING|NOTICE)", p.name, re.I)]
+        extra.append(("Tesseract OCR", "Apache-2.0", found))
+    target = licenses.write_license_texts(dists, folder / licenses.TEXTS_FILE, extra)
+    for name in (licenses.LICENSE_FILE, licenses.NOTICES_FILE):
+        shutil.copyfile(ROOT / name, folder / name)
+    print(f"Licencias: {target} ({len(dists)} paquetes)")
+    return target
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tesseract", type=Path, help="carpeta de tesseract a incluir (Windows)")
@@ -84,6 +123,7 @@ def main() -> None:
     app = build()
     if args.tesseract is not None:
         bundle_tesseract(app, args.tesseract)
+    write_licenses(app, args.tesseract)
     print(f"App lista: {app}")
 
 
