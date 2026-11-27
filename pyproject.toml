@@ -22,6 +22,7 @@ clean-metadata = "sanitizer.metadata:main"
 redact = "sanitizer.redact:main"
 anonymize = "sanitizer.pipeline:main"
 revert = "sanitizer.mapping:main"
+audit = "sanitizer.audit:main"
 
 [dependency-groups]
 dev = [

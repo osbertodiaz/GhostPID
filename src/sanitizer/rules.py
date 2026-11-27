@@ -16,6 +16,7 @@ Una config tiene cuatro bloques:
   redacción según el tipo de página, capas ocultas, anotaciones).
 - `logos`: imágenes repetidas que se eliminan, y hashes fijados a mano.
 - `ocr`: OCR del texto en trazos y de los escaneados.
+- `audit`: comprobaciones finales (OCR de la auditoría, franjas de revisión).
 
 Las configs pueden heredar de otra con `extends` (ruta relativa al fichero).
 Al heredar:
@@ -23,7 +24,7 @@ Al heredar:
 - Las reglas y zonas se combinan por `id`: si el hijo repite un `id`, sus
   claves sobrescriben las del padre (p. ej. añadir `exceptions` a una regla
   base sin repetir su patrón); si no, se añaden.
-- `detection`, `metadata`, `redaction`, `logos` y `ocr` se combinan clave a clave.
+- `detection`, `metadata`, `redaction`, `logos`, `ocr` y `audit` se combinan clave a clave.
 - `disable: [id, …]` quita reglas o zonas heredadas.
 
 Cada regla lleva ejemplos. Sirven para validar las regex y para detectar
@@ -49,6 +50,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from sanitizer.audit import AuditPolicy
 from sanitizer.inventory import DetectionParams
 from sanitizer.metadata import MetadataPolicy
 from sanitizer.logos import LogoPolicy
@@ -367,6 +369,7 @@ class Config(_Strict):
     redaction: RedactionPolicy = Field(default_factory=RedactionPolicy)
     logos: LogoPolicy = Field(default_factory=LogoPolicy)
     ocr: OcrPolicy = Field(default_factory=OcrPolicy)
+    audit: AuditPolicy = Field(default_factory=AuditPolicy)
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Config:
@@ -438,7 +441,7 @@ def _merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
     for key, value in child.items():
         if key in _RULE_BLOCKS and isinstance(value, list) and isinstance(out.get(key), list):
             out[key] = _merge_rules(out[key], value)
-        elif key in ("detection", "metadata", "redaction", "logos", "ocr") and isinstance(value, dict) and isinstance(out.get(key), dict):
+        elif key in ("detection", "metadata", "redaction", "logos", "ocr", "audit") and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], value)
         else:
             out[key] = value
