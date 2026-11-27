@@ -30,7 +30,12 @@ uv run pytest
 
 Inventario de solo lectura: metadatos Info y XMP, IDs del documento, adjuntos,
 anotaciones, capas (OCG), JavaScript, fuentes y tipo de cada página (texto
-vectorial, solo imagen, imagen con capa de texto o solo trazos).
+vectorial, solo imagen, imagen con capa de texto, solo trazos).
+
+También estima el **texto convertido a trazos** (típico de AutoCAD con fuentes
+SHX, donde los tags de un P&ID no están en la capa de texto): agrupa paths con
+tamaño de letra alineados en la misma línea base. Las páginas con 50 glifos o
+más se marcan como "texto en trazos" y cuentan como "requiere OCR".
 
 ```bash
 uv run inventory data/ --out data/reports --json

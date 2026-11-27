@@ -23,9 +23,16 @@ from typing import Any
 import pikepdf
 import pymupdf
 
+from sanitizer.stroke_text import find_stroke_text
+
 # Fracción de la página cubierta por imágenes a partir de la cual se
 # considera que la página es "de imagen" (escaneado o plano rasterizado).
 IMAGE_COVERAGE_THRESHOLD = 0.5
+
+# Glifos en trazos (ver stroke_text) a partir de los cuales se considera que
+# la página tiene texto convertido a curvas. Calibrado con planos AutoCAD/SHX:
+# logos y cajetines dan < 40; un P&ID con tags en SHX, > 90.
+STROKE_TEXT_MIN_GLYPHS = 50
 
 # Longitud máxima de los textos citados en el informe (contenido de anotaciones)
 PREVIEW_CHARS = 80
@@ -35,9 +42,11 @@ _JS_TOKEN = re.compile(r"/(JS|JavaScript)(?![A-Za-z0-9])")
 
 PAGE_KIND_LABELS = {
     "text": "texto vectorial",
+    "text_and_stroke_text": "texto vectorial + texto en trazos (necesita OCR en esas zonas)",
+    "stroke_text_only": "solo texto en trazos, sin capa de texto (necesita OCR)",
     "image_only": "solo imagen (escaneado o raster, necesita OCR)",
     "image_with_text": "imagen con capa de texto (posible OCR previo)",
-    "vector_only": "solo trazos, sin texto (¿texto convertido a curvas?)",
+    "vector_only": "solo trazos, sin texto detectado",
     "empty": "vacía",
 }
 
@@ -163,7 +172,10 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
             covered += bbox.width * bbox.height
     coverage = min(covered / page_area, 1.0)
 
-    drawings = len(page.get_cdrawings())
+    cdrawings = page.get_cdrawings()
+    drawings = len(cdrawings)
+    stroke_runs = find_stroke_text(cdrawings)
+    stroke_glyphs = sum(r.glyphs for r in stroke_runs)
 
     annots = []
     for annot in page.annots():
@@ -185,24 +197,33 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
         "images": len(images),
         "image_coverage": round(coverage, 3),
         "drawings": drawings,
+        "stroke_text_runs": len(stroke_runs),
+        "stroke_text_glyphs": stroke_glyphs,
         "links": len(page.get_links()),
         "annotations": annots,
-        "kind": classify_page(len(words), coverage, drawings),
+        "kind": classify_page(len(words), coverage, drawings, stroke_glyphs),
     }
 
 
-def classify_page(words: int, image_coverage: float, drawings: int) -> str:
+def classify_page(
+    words: int, image_coverage: float, drawings: int, stroke_glyphs: int = 0
+) -> str:
     """Clasifica una página según su contenido (ver PAGE_KIND_LABELS)."""
     is_image = image_coverage >= IMAGE_COVERAGE_THRESHOLD
-    if words and is_image:
-        return "image_with_text"
-    if words:
-        return "text"
+    has_stroke_text = stroke_glyphs >= STROKE_TEXT_MIN_GLYPHS
     if is_image:
-        return "image_only"
+        return "image_with_text" if words else "image_only"
+    if words:
+        return "text_and_stroke_text" if has_stroke_text else "text"
+    if has_stroke_text:
+        return "stroke_text_only"
     if drawings:
         return "vector_only"
     return "empty"
+
+
+# Tipos de página cuyo contenido técnico no está (entero) en la capa de texto
+OCR_KINDS = ("image_only", "stroke_text_only", "text_and_stroke_text")
 
 
 def _fonts(doc: pymupdf.Document) -> list[dict[str, Any]]:
@@ -241,7 +262,7 @@ def _summary(report: dict[str, Any]) -> dict[str, Any]:
         "layers": len(report["layers"]),
         "javascript": report["javascript"]["present"],
         "fonts": len(report["fonts"]),
-        "needs_ocr": any(p["kind"] in ("image_only", "vector_only") for p in report["pages"]),
+        "needs_ocr": any(p["kind"] in OCR_KINDS for p in report["pages"]),
     }
 
 
@@ -313,14 +334,15 @@ def format_markdown(report: dict[str, Any]) -> str:
         "",
         "## Páginas",
         "",
-        "| Pág | Tamaño (mm) | Rot | Palabras | Imágenes | Cobertura img | Trazos | Anot. | Tipo |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---|",
+        "| Pág | Tamaño (mm) | Rot | Palabras | Imágenes | Cobertura img | Trazos "
+        "| Glifos en trazos | Anot. | Tipo |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for p in report["pages"]:
         lines.append(
             f"| {p['number']} | {p['width_mm']}×{p['height_mm']} | {p['rotation']} "
             f"| {p['words']} | {p['images']} | {p['image_coverage']:.0%} | {p['drawings']} "
-            f"| {len(p['annotations'])} | {PAGE_KIND_LABELS[p['kind']]} |"
+            f"| {p['stroke_text_glyphs']} | {len(p['annotations'])} | {PAGE_KIND_LABELS[p['kind']]} |"
         )
 
     annotated = [p for p in report["pages"] if p["annotations"]]

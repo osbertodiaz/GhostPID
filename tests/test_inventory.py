@@ -129,17 +129,21 @@ def test_encrypted_pdf_reports_error(plain_pdf, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("words", "coverage", "drawings", "expected"),
+    ("words", "coverage", "drawings", "glyphs", "expected"),
     [
-        (10, 0.0, 5, "text"),
-        (10, 0.9, 0, "image_with_text"),
-        (0, 0.9, 0, "image_only"),
-        (0, 0.1, 30, "vector_only"),
-        (0, 0.0, 0, "empty"),
+        (10, 0.0, 5, 0, "text"),
+        (10, 0.0, 500, 49, "text"),
+        (10, 0.0, 500, 50, "text_and_stroke_text"),
+        (0, 0.0, 500, 200, "stroke_text_only"),
+        (10, 0.9, 0, 0, "image_with_text"),
+        (0, 0.9, 0, 0, "image_only"),
+        (0, 0.9, 500, 200, "image_only"),
+        (0, 0.1, 30, 0, "vector_only"),
+        (0, 0.0, 0, 0, "empty"),
     ],
 )
-def test_classify_page(words, coverage, drawings, expected):
-    assert classify_page(words, coverage, drawings) == expected
+def test_classify_page(words, coverage, drawings, glyphs, expected):
+    assert classify_page(words, coverage, drawings, glyphs) == expected
 
 
 def test_markdown_report_is_readable(rich_pdf):
