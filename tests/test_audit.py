@@ -8,7 +8,7 @@ import pikepdf
 import pymupdf
 import pytest
 
-from sanitizer.audit import audit, build_blacklist, main
+from sanitizer.audit import _crossed_text, audit, build_blacklist, main
 from sanitizer.mapping import MapError, load_map
 from sanitizer.metadata import clean_metadata
 from sanitizer.pipeline import anonymize
@@ -185,3 +185,18 @@ def test_review_ignores_title_block_vocabulary(tmp_path):
     assert not _is_reviewable(cfg, blacklist, "PREPARED BY EPC FOR OPR")
     assert not _is_reviewable(cfg, blacklist, "MEMBRANE P-101A 15 barg")
     assert _is_reviewable(cfg, blacklist, "Drawn: Wile E. Coyote")
+
+
+def test_rotated_ocr_reading_of_real_text_is_a_warning():
+    # Texto real del revés: el OCR puede leer "DOC-REF-108" como "801-..."
+    doc = pymupdf.open()
+    page = doc.new_page(width=842, height=595)
+    page.insert_text((400, 300), "DOC-REF-108", fontsize=10, rotate=180)
+    line = page.get_text("rawdict")["blocks"][0]["lines"][0]
+    area = tuple(pymupdf.Rect(line["bbox"]))
+    assert line["dir"][0] < 0
+    assert _crossed_text(page, area, (1.0, 0.0)) == "DOC-REF-108"
+    # Misma dirección: podría ser una fuga bajo la sustitución, sigue siendo error
+    assert _crossed_text(page, area, (-1.0, 0.0)) is None
+    # Sin texto real que cubra el área, tampoco
+    assert _crossed_text(page, (50, 50, 120, 60), (1.0, 0.0)) is None

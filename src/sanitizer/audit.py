@@ -277,6 +277,40 @@ def _ocr_pages(view: pymupdf.Document, config: Any, anon_report: dict[str, Any] 
     return sorted(done)
 
 
+def _crossed_text(page: pymupdf.Page, rect: tuple, direction: tuple[float, float]) -> str | None:
+    """Texto real que ocupa el área de un hallazgo de OCR con otra orientación.
+
+    Con las páginas giradas el OCR puede leer del revés una denominación
+    genérica (p. ej. "DOC-REF-108" leído como "801-..."). Si en el área hay
+    texto real en otra dirección y nada en la misma dirección que la línea
+    del OCR, lo visible es ese texto, que ya pasó el control de la capa de
+    texto: el hallazgo es una lectura girada. Si hay texto en la misma
+    dirección, no se descarta (podría ser una fuga bajo una sustitución).
+    """
+    area = pymupdf.Rect(rect)
+    if area.is_empty:
+        return None
+    same, other, boxes = [], [], []
+    for block in page.get_text("rawdict", clip=area)["blocks"]:
+        for ln in block.get("lines", []):
+            chars = [c for s in ln["spans"] for c in s["chars"] if pymupdf.Rect(c["bbox"]).intersects(area)]
+            text = "".join(c["c"] for c in chars).strip()
+            if not text:
+                continue
+            dx, dy = ln["dir"]
+            (same if dx * direction[0] + dy * direction[1] > 0.7 else other).append(text)
+            boxes.append(pymupdf.Rect(ln["bbox"]) & area)
+    if same or not other:
+        return None
+    # El texto real debe cubrir casi todo el área del hallazgo
+    covered = pymupdf.Rect(boxes[0])
+    for box in boxes[1:]:
+        covered.include_rect(box)
+    if covered.get_area() < 0.6 * area.get_area():
+        return None
+    return " ".join(other)
+
+
 def _check_ocr(
     path: Path,
     config: Any,
@@ -306,9 +340,15 @@ def _check_ocr(
                         for b in boxes[1:]:
                             r |= b
                         rect = tuple(r)
+                    severity = _severity(config, line.text, start, end)
+                    crossed = _crossed_text(view[number], rect, line.direction) if rect else None
+                    if crossed:
+                        # El OCR leyó en otra orientación texto real que ya pasó el control de texto
+                        severity = "warning"
+                        label = f"{label} · lectura OCR girada de '{crossed}'"
                     result.findings.append(
                         Finding(
-                            _severity(config, line.text, start, end),
+                            severity,
                             "ocr",
                             line.text[start:end],
                             number + 1,
