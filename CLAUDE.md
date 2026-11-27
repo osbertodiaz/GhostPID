@@ -24,6 +24,8 @@ Python 3.12, uv, PyMuPDF, pikepdf, pdfplumber, OpenCV, pytesseract, pyyaml, pyte
 - OCR necesita `brew install tesseract tesseract-lang`
 - Mapa: `anonymize … --map data/maps/<proyecto>.map.json`; reversión: `uv run revert --map … [fichero]`
 - Los mapas contienen valores originales: solo en data/ (save_map lo impone)
+- Auditoría: `uv run audit <final.pdf> --config … --out data/reports/<doc> [--original … --anon-report … --map …]`
+- pikepdf: para leer el contenido de un objeto indirecto usar `unparse(resolved=True)`; `unparse()` solo da la referencia
 
 ## Flexibilidad
 - Los sets de `data/` son solo ejemplos: no sobreajustar a ellos. Todo umbral va en un dataclass de parámetros configurable desde el bloque `detection` del YAML.

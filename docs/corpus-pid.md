@@ -164,3 +164,30 @@ borradas por OCR toca un dato protegido leído en la entrada.
   describen: el motor solo quita lo que la config dice.
 - **Rendimiento**: ~8–16 s por página con OCR (un set escaneado de 68 páginas,
   ~10 min); las páginas que no lo necesitan no lo pagan.
+
+## Auditoría: resultados sobre el corpus (fase 7)
+
+Ciclo completo sobre los 6 sets: `anonymize` → `clean-metadata` → `audit`
+(OCR de todas las páginas, unos 40 minutos en total).
+
+- **Metadatos y objetos**: limpios en los 6. Al escribir la auditoría salió que
+  `unparse()` de pikepdf sobre un objeto indirecto solo devuelve la referencia
+  (`1 0 R`). Las comprobaciones de las fases 3 y 4 que buscaban restos en los
+  diccionarios eran más débiles de lo que parecía. Se corrigieron
+  (`unparse(resolved=True)`) y se repitió la verificación: la limpieza ya era
+  correcta.
+- **Restos que el anonimizado no vio**: en un set escaneado, 9 referencias
+  documentales y un teléfono que el OCR del anonimizado leyó mal y el de la
+  auditoría leyó bien (la variabilidad del OCR de la fase 5). En otro set, un
+  término dentro de otra palabra ("NOMBRE" en "NOMBREAN BELT ROAD"): la
+  sustitución exige palabra completa, pero la auditoría busca también dentro
+  de palabras.
+- **Texto restante para revisar**: en todos los sets aparecen arriba
+  justamente los nombres que las reglas no conocían: operador, sigla, dirección
+  completa, e-mail, web, nombre de la refinería y logos en escaneados. Para
+  reducir el ruido se descartan las etiquetas típicas de cajetín y las líneas
+  de OCR con confianza media menor de 80.
+
+**Pendiente para la fase 8**: usar los hallazgos de la auditoría para
+corregir automáticamente (redactar las áreas de los restos que tienen
+coordenadas y volver a auditar) en lugar de solo informar.

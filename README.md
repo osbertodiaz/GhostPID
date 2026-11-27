@@ -202,6 +202,31 @@ uv run revert --map data/maps/<proyecto>.map.json respuesta_llm.txt > respuesta.
   ese sentido, `revert` las cambiará igualmente. Para evitarlo, usa algo
   inequívoco en la config (p. ej. `[EPC]`).
 
+## Verificación y auditoría (fase 7)
+
+```bash
+uv run audit data/out/plano.final.pdf --config configs/<cliente>.yaml --out data/reports/plano \
+    --original data/plano.pdf --anon-report data/reports/plano.anon.json --map data/maps/<proyecto>.map.json
+```
+
+Comprueba el PDF final con independencia de cómo se produjo y termina con
+código 1 si encuentra restos:
+
+- **Lista negra**: términos y patrones de la config y los valores originales
+  del mapa (los que se encontraron de verdad). Se buscan en el texto de todas
+  las capas, en anotaciones y formularios, en **todos los objetos** del PDF
+  (streams descomprimidos, salvo imágenes) y en el **OCR de todas las páginas**
+  (`audit.ocr_pages`), que es lo que ve un LLM con visión.
+- **Metadatos**: se releen con pikepdf.
+- **Revisión visual**: un PNG por página con las áreas tocadas resaltadas por
+  colores (sustitución, OCR, zona, logo y restos encontrados).
+- **Texto restante para revisar**: líneas en la franja del cajetín
+  (`audit.review_areas`) que no son datos protegidos ni denominaciones
+  genéricas, para detectar nombres que las reglas no conocen.
+- Informe `auditoria.md` y `auditoria.json` con qué se eliminó, cuántas veces y
+  en qué páginas. Como contiene valores originales, **solo se guarda en
+  `data/`**.
+
 ## Uso (previsto, fase 8)
 
 ```bash
