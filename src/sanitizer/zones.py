@@ -61,6 +61,7 @@ def apply_zones(session: Session) -> int:
                 _write_label(page, zone.label, view, policy)
             applied += 1
         session.add_line_art(page.number, areas)
+        session.pixel_pages.add(page.number)
     return applied
 
 

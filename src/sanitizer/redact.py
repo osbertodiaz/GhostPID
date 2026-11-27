@@ -107,6 +107,10 @@ class RedactionPolicy:
     # se buscan también dentro de otras palabras. Redactar de más en una capa
     # OCR invisible es preferible a dejar una fuga.
     ocr_relaxed_terms: bool = True
+    # Al blanquear píxeles, MuPDF descomprime la imagen y la guarda sin
+    # pérdidas: un escaneado JPEG ocupa 10 veces más. Las imágenes que eran
+    # JPEG en el original se vuelven a codificar en JPEG con esta calidad
+    jpeg_quality: int = 90
     # Separación vertical máxima entre letras y número de un tag apilado, en
     # alturas de línea, y desalineación horizontal máxima de sus centros
     stacked_max_gap: float = 1.6
@@ -211,6 +215,10 @@ class Namer:
                 "originals": {o: dict(stats) for o, stats in entry["originals"].items()},
             }
         return namer
+
+    def alias(self, template: str, original: str, value: str) -> None:
+        """Hace que `original` reciba la denominación ya existente `value`."""
+        self._values[(template, normalize(original))] = value
 
     def name(self, template: str, original: str, rule: Any = None, exact: bool = True) -> str:
         """Denominación para `original`. `exact`: leído del texto real (no OCR)."""
@@ -698,6 +706,16 @@ def _process_annotations(page: pymupdf.Page, config: Any, namer: Namer, report: 
 # --------------------------------------------------------------------------
 
 
+def to_bytes(doc: pymupdf.Document) -> bytes:
+    """Serializa el documento comprimiendo también las imágenes.
+
+    Tras blanquear píxeles, MuPDF guarda las imágenes descomprimidas (un plano
+    escaneado puede ocupar cientos de MB en RGB). Una copia sin comprimir de
+    un set así supera los 2 GB y MuPDF falla al reabrirla.
+    """
+    return doc.tobytes(garbage=1, deflate=True, deflate_images=True)
+
+
 def _open_with_all_layers(path: Path, policy: RedactionPolicy) -> tuple[pymupdf.Document, dict | None]:
     """Abre el PDF con todas las capas visibles; devuelve el estado para restaurarlo."""
     doc = pymupdf.open(path)
@@ -707,7 +725,7 @@ def _open_with_all_layers(path: Path, policy: RedactionPolicy) -> tuple[pymupdf.
     state = doc.get_layer(-1)
     doc.set_layer(-1, on=ocgs, off=[])
     # MuPDF aplica la nueva visibilidad al reabrir el documento
-    data = doc.tobytes()
+    data = to_bytes(doc)
     doc.close()
     return pymupdf.open("pdf", data), state
 
@@ -726,12 +744,12 @@ def _without_annotations(doc: pymupdf.Document) -> pymupdf.Document:
     redactara sobre él, `apply_redactions` borraría la anotación entera. El
     texto de página se busca en esta copia y el de las anotaciones, aparte.
     """
-    copy = pymupdf.open("pdf", doc.tobytes())
+    copy = pymupdf.open("pdf", to_bytes(doc))
     # Se quita la lista /Annots a bajo nivel: borrar una a una falla con
     # anotaciones que tienen popups o respuestas encadenadas
     for page in copy:
         copy.xref_set_key(page.xref, "Annots", "null")
-    return pymupdf.open("pdf", copy.tobytes())
+    return pymupdf.open("pdf", to_bytes(copy))
 
 
 # --------------------------------------------------------------------------
@@ -772,6 +790,8 @@ class Session:
         # Rectángulos (coordenadas de página) donde se permite perder datos
         # protegidos: las zonas se eliminan enteras
         self.cleared: dict[int, list[pymupdf.Rect]] = collections.defaultdict(list)
+        # Páginas (índices) en las que se han blanqueado píxeles de imágenes
+        self.pixel_pages: set[int] = set()
 
     def close(self) -> None:
         self.doc.close()
@@ -823,6 +843,8 @@ class Session:
             if planned:
                 page_mode_cfg = getattr(policy, mode)
                 areas = _apply_page(page, planned, page_mode_cfg, policy, hidden_ocg)
+                if page_mode_cfg.images != "none":
+                    self.pixel_pages.add(number)
                 if areas:
                     self.add_line_art(number, areas, page_mode_cfg.graphics == "touched")
                 report.replacements += [p.replacement for p in planned]
@@ -847,7 +869,8 @@ class Session:
         if not self.line_art:
             return
         self.restore_layers()
-        with pikepdf.open(io.BytesIO(self.doc.tobytes(garbage=1, deflate=True))) as pdf:
+        self._restore_lossy_images()
+        with pikepdf.open(io.BytesIO(to_bytes(self.doc))) as pdf:
             for number, jobs in sorted(self.line_art.items()):
                 for areas, touched in jobs:
                     result = remove_paths(pdf, number, areas, touched)
@@ -865,6 +888,7 @@ class Session:
     def view(self) -> pymupdf.Document:
         """Copia tal como se ve: capas en su estado guardado y sin anotaciones."""
         self.restore_layers()
+        self._restore_lossy_images()
         return _without_annotations(self.doc)
 
     def save(self, dst: str | Path) -> None:
@@ -873,8 +897,47 @@ class Session:
             raise ValueError("la salida no puede sobrescribir el PDF original")
         self.restore_layers()
         self.flush_line_art()
-        self.doc.save(dst, garbage=3, deflate=True)
+        self._restore_lossy_images()
+        # deflate_images: lo que siga sin comprimir tras blanquear píxeles
+        self.doc.save(dst, garbage=3, deflate=True, deflate_images=True)
         self.report.mapping = self.namer.mapping
+
+    def _restore_lossy_images(self) -> None:
+        """Vuelve a codificar en JPEG las imágenes que lo eran en el original.
+
+        Solo en páginas con píxeles blanqueados y solo imágenes de 8 bits que
+        ocupan el mismo sitio que una imagen JPEG/JPEG2000 del original.
+        """
+        if not self.pixel_pages:
+            return
+        with pymupdf.open(self.src) as original:
+            for number in sorted(self.pixel_pages):
+                lossy = set()
+                for info in original[number].get_images(full=True):
+                    filters = original.xref_get_key(info[0], "Filter")[1]
+                    if "DCTDecode" in filters or "JPXDecode" in filters:
+                        lossy |= {tuple(round(v) for v in r) for r in original[number].get_image_rects(info[0])}
+                if not lossy:
+                    continue
+                page = self.doc[number]
+                for info in page.get_images(full=True):
+                    xref, bpc = info[0], info[4]
+                    if bpc != 8 or "DCTDecode" in self.doc.xref_get_key(xref, "Filter")[1]:
+                        continue
+                    if not any(tuple(round(v) for v in r) in lossy for r in page.get_image_rects(xref)):
+                        continue
+                    pix = pymupdf.Pixmap(self.doc, xref)
+                    if pix.alpha:
+                        pix = pymupdf.Pixmap(pix, 0)
+                    if pix.n not in (1, 3):
+                        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                    self.doc.update_stream(xref, pix.tobytes("jpeg", jpg_quality=self.policy.jpeg_quality), compress=0)
+                    self.doc.xref_set_key(xref, "Filter", "/DCTDecode")
+                    self.doc.xref_set_key(xref, "DecodeParms", "null")
+                    if pix.n == 1:
+                        self.doc.xref_set_key(xref, "ColorSpace", "/DeviceGray")
+                    elif pix.n == 3 and pix.colorspace and pix.colorspace.n == 3:
+                        self.doc.xref_set_key(xref, "ColorSpace", "/DeviceRGB")
 
     def verify(self, dst: str | Path) -> None:
         """Relee la salida: coincidencias que sigan ahí y datos protegidos perdidos."""

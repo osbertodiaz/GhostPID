@@ -290,6 +290,7 @@ def ocr_redact(session: Session, only: set[int] | None = None) -> set[int]:
                 graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                 text=pymupdf.PDF_REDACT_TEXT_REMOVE,
             )
+            session.pixel_pages.add(number)
         else:
             to_pdf = ~page.transformation_matrix
             areas = []
