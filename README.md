@@ -10,7 +10,29 @@ La anonimización es **determinista** (reglas, regex y coordenadas). No se usa
 ningún LLM para redactar. Toda redacción elimina el texto real con
 `apply_redactions`; no basta con taparlo.
 
-> **Manual de uso** (instalación, app de revisión, reglas y problemas frecuentes): [docs/MANUAL.md](docs/MANUAL.md)
+> **Manual de uso** (instalación, app de revisión, reglas y problemas frecuentes): [docs/MANUAL.md](docs/MANUAL.md) · English: [docs/MANUAL.en.md](docs/MANUAL.en.md)
+
+## Idioma
+
+La UI de revisión, la app de escritorio, la salida y los `--help` de los
+comandos, los mensajes de error de la config y los informes Markdown salen en
+**español si el sistema operativo está en español** (cualquier `es_*`) y en
+**inglés en cualquier otro caso**. Se lee el idioma de la interfaz del sistema
+(`AppleLanguages` en macOS, `GetUserDefaultUILanguage` en Windows) y, si no
+hay, las variables `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` y `LANG`. Para forzarlo:
+
+```bash
+PID_ANONYMOUSE_LANG=en uv run validate-config configs/example.yaml
+```
+
+No se traducen las claves YAML, los ids de reglas, las categorías
+(`company`, `manufacturer`…), las columnas del CSV de la lista negra, las
+denominaciones genéricas (`EPC-n`, `VENDOR-n`…), las claves del JSON de los
+informes ni los nombres de fichero (`auditoria.md`). El mecanismo está en
+[src/sanitizer/i18n.py](src/sanitizer/i18n.py): cada texto se escribe en los
+dos idiomas allí donde se usa, `tr("texto", "text")`, sin catálogos que
+compilar ni empaquetar. Los tests fuerzan español por
+defecto (`tests/conftest.py`).
 
 ## Requisitos
 

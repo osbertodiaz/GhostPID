@@ -56,6 +56,8 @@ jobs:
         run: |
           Copy-Item scripts\LEEME-windows.txt "dist\PID Anonymouse\LEEME.txt"
           Copy-Item docs\MANUAL.md "dist\PID Anonymouse\MANUAL.md"
+          Copy-Item scripts\README-windows.txt "dist\PID Anonymouse\README.txt"
+          Copy-Item docs\MANUAL.en.md "dist\PID Anonymouse\MANUAL.en.md"
           $name = "PID-Anonymouse-windows-x64.zip"
           Compress-Archive -Path "dist\PID Anonymouse" -DestinationPath $name
           "ZIP=$name" | Out-File -FilePath $env:GITHUB_ENV -Append

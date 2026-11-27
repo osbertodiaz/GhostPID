@@ -23,5 +23,9 @@ Uso
 Importante: data\ y configs\<cliente>.yaml contienen los nombres reales que
 se quieren ocultar. No los compartas; comparte solo el PDF de data\out\.
 
-Manual completo: MANUAL.md (en esta carpeta).
+Idioma: la app sale en español si Windows está en español y en inglés en
+cualquier otro caso. Para forzarlo, define la variable de entorno
+PID_ANONYMOUSE_LANG=es (o en).
+
+Manual completo: MANUAL.md (en esta carpeta). English: MANUAL.en.md.
 Código y documentación: https://github.com/osbertodiaz/PID_Anonymouse

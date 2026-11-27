@@ -14,6 +14,12 @@ notas.
 - **El texto se borra de verdad:** no se tapa con un recuadro. Un LLM no
   puede recuperarlo ni leyendo la capa de texto ni "mirando" la imagen.
 
+> **Idioma.** La app y los comandos siguen el idioma del sistema operativo:
+> español si está en español (cualquier `es_*`) e inglés en cualquier otro
+> caso. Para forzar uno, define la variable de entorno
+> `PID_ANONYMOUSE_LANG=es` o `PID_ANONYMOUSE_LANG=en`. English manual:
+> [MANUAL.en.md](MANUAL.en.md).
+
 ---
 
 ## 1. Instalación
@@ -364,6 +370,7 @@ varias ubicaciones. `revert` solo está disponible desde la línea de comandos.
 | "Cambio rechazado" al añadir algo | El cambio dejaría la config inválida (p. ej. un término que es a la vez excepción). Lee el mensaje; la config no se ha tocado |
 | El proceso es lento | Es normal con muchas páginas escaneadas: el OCR se repite para no dejar restos. Mientras ajustas reglas, usa **Recalcular** (sin OCR) |
 | Quiero deshacer el último cambio de la config | Copia `configs/<cliente>.yaml.bak` sobre `configs/<cliente>.yaml` |
+| La app sale en otro idioma | Define `PID_ANONYMOUSE_LANG=es` (o `en`) antes de abrirla |
 
 ---
 
