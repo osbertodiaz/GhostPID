@@ -16,6 +16,13 @@ Python 3.12, uv, PyMuPDF, pikepdf, pdfplumber, OpenCV, pytesseract, pyyaml, pyte
 ## Comandos
 - Tests: `uv run pytest`
 - CLI: `uv run sanitize <pdf> --config configs/<cliente>.yaml`
+- Diagnóstico: `uv run inventory data/ --out data/reports [--config configs/<cliente>.yaml]`
+- Reglas: `uv run validate-config configs/<cliente>.yaml --check "texto"`
+
+## Flexibilidad
+- Los sets de `data/` son solo ejemplos: no sobreajustar a ellos. Todo umbral va en un dataclass de parámetros configurable desde el bloque `detection` del YAML.
+- Las configs de cliente (`configs/*.yaml` salvo base y example) contienen nombres reales y están en .gitignore.
+- Nunca copiar identificadores reales de `data/` a ficheros versionados (ejemplos, tests, docs).
 
 ## Idioma
 Documentación y comentarios en español. Código en inglés.

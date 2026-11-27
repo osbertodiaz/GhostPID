@@ -53,6 +53,42 @@ Sin `--out`, el informe sale por pantalla. El informe reproduce datos reales
 (autor, títulos, nombres de capas), así que guárdalo solo dentro de `data/`:
 si `--out` apunta fuera, el comando avisa.
 
+## Reglas por cliente (fase 2)
+
+Cada cliente o plantilla tiene una config YAML en `configs/` que hereda de
+[configs/base.yaml](configs/base.yaml) (patrones genéricos de P&ID). Parte de
+[configs/example.yaml](configs/example.yaml), con nombres ficticios:
+
+```bash
+cp configs/example.yaml configs/<cliente>.yaml
+uv run validate-config configs/<cliente>.yaml --check "texto de prueba"
+```
+
+Bloques:
+
+- `whitelist`: lo que se conserva siempre (tags, líneas, tamaños, condiciones
+  de diseño, alarmas, interlocks). Prioridad absoluta sobre las sustituciones.
+  Por defecto un patrón solo encaja como token completo: `PID-001` no se
+  protege dentro de `ACM-2041-PID-001`. `exceptions` quita protección a formas
+  con aspecto de tag que no lo son (p. ej. un código de proyecto).
+- `substitutions`: términos literales o regex y su denominación genérica
+  (`EPC`, `OPR`, `VENDOR-{n}`, `DOC-REF-{n}`…), por categoría.
+- `zones`: rectángulos que se eliminan enteros, en fracción de página o en mm,
+  anclados a una esquina y filtrables por página y orientación.
+- `detection`: umbrales de los detectores. Los valores por defecto se
+  calibraron con un corpus de ejemplo y son solo un punto de partida.
+
+Herencia con `extends`: las reglas se combinan por `id` (repetir un `id`
+sobrescribe solo las claves indicadas), `disable: [id]` quita reglas heredadas.
+
+`validate-config` comprueba el esquema y los ejemplos de cada regla, y detecta
+solapes entre lista blanca y sustituciones (sale con código 1 si hay errores).
+`--check` muestra qué haría cada regla con un texto. El inventario acepta
+`--config` para usar los umbrales de detección del cliente.
+
+**Las configs de cliente contienen los nombres que se quieren ocultar**: git
+solo versiona `base.yaml` y `example.yaml`.
+
 ## Uso (previsto, fase 8)
 
 ```bash

@@ -4,6 +4,13 @@ Resumen del diagnóstico (fase 1) sobre 6 sets reales de P&ID y planos de proces
 guardados en `data/` (fuera de git). Aquí solo se describen **patrones
 técnicos**; no se citan empresas, personas, proyectos ni ubicaciones.
 
+Estos sets son **ejemplos**, no el universo de casos: aparecerán otros
+orígenes (otros CAD, otras impresoras PDF, otros escáneres). Por eso todos los
+umbrales calibrados aquí son valores por defecto de un dataclass de parámetros
+(`StrokeTextParams`, `DetectionParams`) que cada config puede ajustar en su
+bloque `detection`, y la lista blanca base es un punto de partida que cada
+cliente amplía o corrige.
+
 | Set | Origen aparente | Páginas | Cómo está el texto | Qué implica |
 |---|---|---:|---|---|
 | A | AutoCAD → plotter PDF, A1/ANSI D | 25 | Cajetín en TrueType; tags en **trazos SHX**, una letra por path | OCR en las zonas de tags; el texto real es casi solo el cajetín |
@@ -60,3 +67,18 @@ discontinuas y parcelas de un mapa catastral.
 **Limitación conocida**: en mapas de situación con parcelas irregulares quedan
 algunas detecciones (~100 glifos en una portada), lo que solo provoca que esa
 página pida OCR sin necesidad.
+
+## Lista blanca base contra texto real
+
+Probada contra la capa de texto de los sets con texto extraíble. Lecciones:
+
+- Con `\b` como límite, fragmentos con forma de tag dentro de referencias
+  documentales quedaban protegidos y la referencia solo se sustituía a medias.
+  Por eso la lista blanca usa límites de token (`boundary: token`).
+- El formato métrico de número de línea (`150-PG-1001-B1`) se tragaba
+  referencias documentales que empiezan por un código de 5 cifras; el tamaño
+  se limita a 1–4 dígitos.
+- En los globos de instrumento, letras y número de lazo son palabras distintas
+  en la capa de texto (`TI` / `01234`). Los números sueltos no se protegen,
+  así que una sustitución por regex numérica (p. ej. `\d{6}` para un número
+  de proyecto) podría alcanzar números de lazo. **Pendiente para la fase 4.**
