@@ -129,6 +129,19 @@ class Blacklist:
     literals: list[str]
     patterns: list[tuple[str, re.Pattern[str]]]  # (regla, regex)
     generics: set[str]
+    # Excepciones de cada regla: coincidencias descartadas al revisar
+    excepted: dict[str, Any] = field(default_factory=dict)
+
+    def _pattern_hits(self, text: str) -> list[tuple[int, int, str]]:
+        hits = []
+        for rule_id, rx in self.patterns:
+            rule = self.excepted.get(rule_id)
+            hits += [
+                (m.start(), m.end(), f"patrón '{rule_id}'")
+                for m in rx.finditer(text)
+                if not (rule and rule.excepted(m.group()))
+            ]
+        return hits
 
     def text_hits(self, text: str) -> list[tuple[int, int, str]]:
         """Restos en texto extraído: literales (sin distinguir mayúsculas,
@@ -138,9 +151,7 @@ class Blacklist:
             words = lit.split()
             rx = re.compile(r"\s*".join(re.escape(w) for w in words) if len(words) > 1 else re.escape(lit), re.IGNORECASE)
             hits += [(m.start(), m.end(), lit) for m in rx.finditer(text)]
-        for rule_id, rx in self.patterns:
-            hits += [(m.start(), m.end(), f"patrón '{rule_id}'") for m in rx.finditer(text)]
-        return hits
+        return hits + self._pattern_hits(text)
 
     def ocr_hits(self, text: str) -> list[tuple[int, int, str]]:
         """Como text_hits, tolerando confusiones de OCR en los literales."""
@@ -152,9 +163,7 @@ class Blacklist:
             words = ocr_normalize(lit).split()
             rx = re.compile(r"\s*".join(re.escape(w) for w in words))
             hits += [(m.start(), m.end(), lit) for m in rx.finditer(norm)]
-        for rule_id, rx in self.patterns:
-            hits += [(m.start(), m.end(), f"patrón '{rule_id}'") for m in rx.finditer(text)]
-        return hits
+        return hits + self._pattern_hits(text)
 
 
 def build_blacklist(config: Any, map_data: dict[str, Any] | None) -> Blacklist:
@@ -171,8 +180,11 @@ def build_blacklist(config: Any, map_data: dict[str, Any] | None) -> Blacklist:
                 generics.add(value.casefold())
     # Un original que coincide con una denominación genérica no es un resto
     literals = {lit for lit in literals if lit and lit.casefold() not in generics}
+    # Un original del mapa que luego se declaró excepción tampoco
+    literals = {lit for lit in literals if not any(rule.excepted(lit) for rule in config.substitutions)}
     patterns = [(rule.id, rx) for rule in config.substitutions for rx in rule.pattern_regexes]
-    return Blacklist(sorted(literals, key=lambda s: (-len(s), s)), patterns, generics)
+    excepted = {rule.id: rule for rule in config.substitutions if rule.exceptions}
+    return Blacklist(sorted(literals, key=lambda s: (-len(s), s)), patterns, generics, excepted)
 
 
 def _protected_spans(config: Any, text: str) -> list[tuple[int, int]]:

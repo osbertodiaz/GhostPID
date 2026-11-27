@@ -302,7 +302,7 @@ def find_matches(
             searches = [(rx, text) for rx in (rule.relaxed_matchers if relaxed else rule.matchers)]
         for rx, haystack in searches:
             for m in rx.finditer(haystack):
-                if m.end() > m.start():
+                if m.end() > m.start() and not rule.excepted(text[m.start() : m.end()]):
                     candidates.append((m.start(), -(m.end() - m.start()), order, m.end(), rule))
     candidates.sort(key=lambda c: c[:3])
 
@@ -343,7 +343,9 @@ def near_misses(config: Any, text: str, accepted: list[Match]) -> list[tuple[str
             raw += rule.patterns
         for pattern in raw:
             for m in re.finditer(pattern, text, flags):
-                if m.end() > m.start() and not any(m.start() < a.end and a.start < m.end() for a in accepted):
+                if m.end() <= m.start() or rule.excepted(m.group()):
+                    continue
+                if not any(m.start() < a.end and a.start < m.end() for a in accepted):
                     a, b = max(0, m.start() - 10), min(len(text), m.end() + 10)
                     out.append((text[a:b].replace("\n", " "), rule))
     return out

@@ -72,7 +72,10 @@ Bloques:
   protege dentro de `ACM-2041-PID-001`. `exceptions` quita protección a formas
   con aspecto de tag que no lo son (p. ej. un código de proyecto).
 - `substitutions`: términos literales o regex y su denominación genérica
-  (`EPC`, `OPR`, `VENDOR-{n}`, `DOC-REF-{n}`…), por categoría.
+  (`EPC`, `OPR`, `VENDOR-{n}`, `DOC-REF-{n}`…), por categoría. Sus
+  `exceptions` son textos literales que encajan con la regla pero se
+  conservan (falsos positivos descartados al revisar): se comparan enteros,
+  con espacios flexibles, y tampoco cuentan como restos en la auditoría.
 - `zones`: rectángulos que se eliminan enteros, en fracción de página o en mm,
   anclados a una esquina y filtrables por página y orientación.
 - `detection`: umbrales de los detectores. Los valores por defecto se

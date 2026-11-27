@@ -469,3 +469,38 @@ def test_cli_exit_codes(tmp_path, capsys):
     )
     assert main([str(conflict)]) == 1
     assert main([str(tmp_path / "missing.yaml")]) == 1
+
+
+def test_substitution_exceptions_are_literal_and_whole(tmp_path):
+    cfg = client(
+        tmp_path,
+        """
+        substitutions:
+          - id: project_code
+            category: project
+            replacement: PRJ-{n}
+            patterns: ['PRJ-\\d{4}']
+            examples: [PRJ-4711]
+            exceptions: ['prj-0000']
+        """,
+    )
+    rule = cfg.substitutions[0]
+    assert rule.excepted("PRJ-0000") and not rule.excepted("PRJ-4711")
+
+
+def test_exception_cannot_contradict_examples(tmp_path):
+    msgs = errors_of(
+        tmp_path,
+        """
+        version: 1
+        name: T
+        substitutions:
+          - id: project_code
+            category: project
+            replacement: PRJ
+            patterns: ['PRJ-\\d{4}']
+            examples: [PRJ-4711]
+            exceptions: [PRJ-4711]
+        """,
+    )
+    assert any("exceptions" in m for m in msgs)

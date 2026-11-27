@@ -444,3 +444,20 @@ def test_pattern_near_miss_reported(tmp_path, config):
     path = _single_page(tmp_path, lambda p: p.insert_text((100, 100), "see ACM-2041-PID-064/065", fontsize=10))
     report = redact_pdf(path, tmp_path / "nm.pdf", config)
     assert [n.rule for n in report.near_misses] == ["document_refs"]
+
+
+def test_substitution_exceptions_are_not_replaced(tmp_path):
+    from sanitizer.redact import find_matches, near_misses
+
+    cfg = _config(
+        tmp_path,
+        """
+        substitutions:
+          - id: project_code
+            exceptions: [PRJ-0000]
+        """,
+    )
+    text = "Ref PRJ-4711 and PRJ-0000"
+    accepted, _ = find_matches(cfg, text)
+    assert [text[m.start : m.end] for m in accepted] == ["PRJ-4711"]
+    assert not near_misses(cfg, "xPRJ-0000x", [])

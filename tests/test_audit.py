@@ -200,3 +200,24 @@ def test_rotated_ocr_reading_of_real_text_is_a_warning():
     assert _crossed_text(page, area, (-1.0, 0.0)) is None
     # Sin texto real que cubra el área, tampoco
     assert _crossed_text(page, (50, 50, 120, 60), (1.0, 0.0)) is None
+
+
+def test_audit_ignores_substitution_exceptions(tmp_path):
+    path = tmp_path / "c.yaml"
+    path.write_text(
+        dedent(
+            f"""
+            version: 1
+            name: T
+            extends: {Path(__file__).parent.parent / "configs" / "example.yaml"}
+            substitutions:
+              - id: project_code
+                exceptions: [PRJ-0000]
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_config(path)
+    bl = build_blacklist(cfg, {"entries": {"PRJ-1": {"originals": {"PRJ-0000": {}}}}})
+    assert "PRJ-0000" not in bl.literals
+    assert [h[2] for h in bl.text_hits("PRJ-0000 PRJ-4711")] == ["patrón 'project_code'"]

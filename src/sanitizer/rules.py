@@ -203,8 +203,12 @@ class SubstitutionRule(_Strict):
     examples: list[str] = Field(default_factory=list)
     case_sensitive: bool = False
     boundary: Literal["token", "none"] = "token"
+    # Textos literales que encajan con la regla pero NO se sustituyen (falsos
+    # positivos descartados al revisar). Comparación del texto entero, con
+    # espacios flexibles y sin distinguir mayúsculas salvo `case_sensitive`.
+    exceptions: list[str] = Field(default_factory=list)
 
-    @field_validator("terms")
+    @field_validator("terms", "exceptions")
     @classmethod
     def _clean_terms(cls, terms: list[str]) -> list[str]:
         cleaned = [t.strip() for t in terms]
@@ -238,7 +242,20 @@ class SubstitutionRule(_Strict):
             orphan = [e for e in self.examples if not any(rx.fullmatch(e) for rx in self.pattern_regexes)]
             if orphan:
                 raise ValueError(f"estos ejemplos no encajan enteros con ningún patrón: {orphan}")
+        contradictions = [s for s in self.samples if self.excepted(s)]
+        if contradictions:
+            raise ValueError(f"estos términos o ejemplos figuran también en exceptions: {contradictions}")
         return self
+
+    def excepted(self, text: str) -> bool:
+        """¿Es `text` (una coincidencia de la regla) una de sus excepciones?"""
+        if not self.exceptions:
+            return False
+        key = " ".join(text.split())
+        if not self.case_sensitive:
+            key = key.casefold()
+            return any(key == " ".join(e.split()).casefold() for e in self.exceptions)
+        return any(key == " ".join(e.split()) for e in self.exceptions)
 
     @property
     def _flags(self) -> int:
@@ -645,7 +662,10 @@ def explain(config: Config, text: str) -> list[str]:
             for m in rx.finditer(text):
                 a, b = m.span()
                 clash = any(a < pb and pa < b for pa, pb in protected)
-                verdict = "BLOQUEADO por la lista blanca" if clash else f"→ '{sub.replacement}'"
+                if sub.excepted(m.group(0)):
+                    verdict = "EXCEPCIÓN de la regla: se conserva"
+                else:
+                    verdict = "BLOQUEADO por la lista blanca" if clash else f"→ '{sub.replacement}'"
                 lines.append(f"  sustituir  '{m.group(0)}' ← '{sub.id}' ({sub.category.value}) {verdict}")
     return lines or ["  (ninguna regla encaja)"]
 
