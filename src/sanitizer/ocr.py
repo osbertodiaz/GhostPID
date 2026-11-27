@@ -43,6 +43,7 @@ from sanitizer.redact import (
     page_mode,
 )
 from sanitizer.stroke_text import find_stroke_text, page_scale
+from sanitizer.i18n import tr
 
 # Rotaciones que admite la transposición exacta de PIL
 _TRANSPOSE = {90: Image.Transpose.ROTATE_90, 180: Image.Transpose.ROTATE_180, 270: Image.Transpose.ROTATE_270}
@@ -75,9 +76,9 @@ class OcrPolicy:
     def __post_init__(self) -> None:
         bad = [r for r in self.rotations if r not in (0, 90, 180, 270)]
         if bad:
-            raise ValueError(f"rotations solo admite 0, 90, 180 y 270: {bad}")
+            raise ValueError(tr("rotations solo admite 0, 90, 180 y 270: {bad}", "rotations only accepts 0, 90, 180 and 270: {bad}", bad=bad))
         if self.passes < 1:
-            raise ValueError("passes debe ser al menos 1")
+            raise ValueError(tr("passes debe ser al menos 1", "passes must be at least 1"))
 
 
 @dataclass

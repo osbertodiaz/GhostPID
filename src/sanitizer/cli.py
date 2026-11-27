@@ -37,6 +37,7 @@ from sanitizer.mapping import MapError, inside_data, load_map, namer_from_map, s
 from sanitizer.metadata import clean_metadata
 from sanitizer.pipeline import anonymize
 from sanitizer.repair import repair, repairable
+from sanitizer.i18n import tr
 
 # Nombres de salidas propias que no se vuelven a procesar al recorrer carpetas
 _OWN_OUTPUTS = (".sanitized.", ".anon.", ".final.", ".meta.", ".redact.")
@@ -148,17 +149,20 @@ def collect_inputs(inputs: list[Path], exclude: list[Path]) -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="sanitize",
-        description="Anonimiza P&ID y PFD en PDF: zonas, logos, texto, OCR, metadatos y auditoría.",
+        description=tr(
+            "Anonimiza P&ID y PFD en PDF: zonas, logos, texto, OCR, metadatos y auditoría.",
+            "Anonymizes P&IDs and PFDs in PDF: zones, logos, text, OCR, metadata and audit.",
+        ),
     )
-    parser.add_argument("inputs", nargs="+", type=Path, help="PDF o carpetas (se recorren recursivamente)")
-    parser.add_argument("--config", type=Path, required=True, help="config YAML del cliente (configs/<cliente>.yaml)")
-    parser.add_argument("--out", type=Path, default=Path("data/out"), help="carpeta de los PDF anonimizados")
-    parser.add_argument("--reports", type=Path, default=Path("data/reports"), help="carpeta de informes (en data/)")
-    parser.add_argument("--maps", type=Path, default=Path("data/maps"), help="carpeta de mapas por documento (en data/)")
-    parser.add_argument("--map", type=Path, help="mapa común para todo el proyecto (numeración compartida)")
-    parser.add_argument("--repair", type=int, default=1, metavar="N", help="pasadas de autocorrección (0 = ninguna)")
-    parser.add_argument("--no-audit", action="store_true", help="no auditar (más rápido, menos seguro)")
-    parser.add_argument("--keep-intermediate", action="store_true", help="conservar los PDF intermedios")
+    parser.add_argument("inputs", nargs="+", type=Path, help=tr("PDF o carpetas (se recorren recursivamente)", "PDFs or folders (walked recursively)"))
+    parser.add_argument("--config", type=Path, required=True, help=tr("config YAML del cliente (configs/<cliente>.yaml)", "client YAML config (configs/<client>.yaml)"))
+    parser.add_argument("--out", type=Path, default=Path("data/out"), help=tr("carpeta de los PDF anonimizados", "folder for the anonymized PDFs"))
+    parser.add_argument("--reports", type=Path, default=Path("data/reports"), help=tr("carpeta de informes (en data/)", "reports folder (inside data/)"))
+    parser.add_argument("--maps", type=Path, default=Path("data/maps"), help=tr("carpeta de mapas por documento (en data/)", "per-document maps folder (inside data/)"))
+    parser.add_argument("--map", type=Path, help=tr("mapa común para todo el proyecto (numeración compartida)", "shared map for the whole project (shared numbering)"))
+    parser.add_argument("--repair", type=int, default=1, metavar="N", help=tr("pasadas de autocorrección (0 = ninguna)", "self-repair passes (0 = none)"))
+    parser.add_argument("--no-audit", action="store_true", help=tr("no auditar (más rápido, menos seguro)", "skip the audit (faster, less safe)"))
+    parser.add_argument("--keep-intermediate", action="store_true", help=tr("conservar los PDF intermedios", "keep the intermediate PDFs"))
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
 
@@ -167,23 +171,23 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config)
     except ConfigError as exc:
-        parser.error(f"config inválida: {exc}")
+        parser.error(tr("config inválida: {exc}", "invalid config: {exc}", exc=exc))
     errors = [i for i in check_overlaps(config) if i.severity == "error"]
     if errors:
         for issue in errors:
-            print(f"ERROR en la config: {issue.message}", file=sys.stderr)
+            print(tr("ERROR en la config: {msg}", "ERROR in the config: {msg}", msg=issue.message), file=sys.stderr)
         return 1
     for folder, label in ((args.reports, "--reports"), (args.maps, "--maps")):
         if not inside_data(folder / "x"):
-            parser.error(f"{label} debe estar dentro de data/: contiene valores originales")
+            parser.error(tr("{label} debe estar dentro de data/: contiene valores originales", "{label} must be inside data/: it contains original values", label=label))
     if args.map is not None and not inside_data(args.map):
-        parser.error("--map debe estar dentro de data/: contiene valores originales")
+        parser.error(tr("--map debe estar dentro de data/: contiene valores originales", "--map must be inside data/: it contains original values"))
     if args.repair < 0:
-        parser.error("--repair no puede ser negativo")
+        parser.error(tr("--repair no puede ser negativo", "--repair cannot be negative"))
 
     pdfs = collect_inputs(args.inputs, [args.out, args.reports, args.maps])
     if not pdfs:
-        parser.error("no se encontró ningún PDF")
+        parser.error(tr("no se encontró ningún PDF", "no PDF found"))
 
     results: list[DocResult] = []
     for pdf in pdfs:
@@ -198,17 +202,25 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # un PDF problemático no debe parar el lote
             doc = DocResult(pdf.name, error=f"{type(exc).__name__}: {exc}")
         results.append(doc)
-        status = "OK" if doc.ok else ("ERROR" if doc.error else "FALLOS")
-        print(f"  {status} · {doc.substitutions} sustituciones · {doc.seconds:.0f} s" + (f" · {doc.error}" if doc.error else ""))
+        status = "OK" if doc.ok else ("ERROR" if doc.error else tr("FALLOS", "FAILED"))
+        print(
+            tr("  {status} · {n} sustituciones · {s:.0f} s", "  {status} · {n} substitutions · {s:.0f} s", status=status, n=doc.substitutions, s=doc.seconds)
+            + (f" · {doc.error}" if doc.error else "")
+        )
 
     print()
-    print("| Documento | Resultado | Sustituciones | Páginas corregidas | Restos | Revisar | Tiempo |")
+    print(
+        tr(
+            "| Documento | Resultado | Sustituciones | Páginas corregidas | Restos | Revisar | Tiempo |",
+            "| Document | Result | Substitutions | Repaired pages | Leftovers | Review | Time |",
+        )
+    )
     print("|---|---|---:|---|---:|---:|---:|")
     for d in results:
-        status = "OK" if d.ok else ("ERROR" if d.error else "FALLOS")
+        status = "OK" if d.ok else ("ERROR" if d.error else tr("FALLOS", "FAILED"))
         pages = ", ".join(map(str, d.repaired_pages)) or "-"
         print(f"| {d.source} | {status} | {d.substitutions} | {pages} | {d.leftovers} | {d.review_lines} | {d.seconds:.0f} s |")
-    print(f"\nInformes en {args.reports}/<documento>/auditoria.md")
+    print(tr("\nInformes en {dir}/<documento>/auditoria.md", "\nReports in {dir}/<document>/auditoria.md", dir=args.reports))
     return 0 if all(d.ok for d in results) else 1
 
 

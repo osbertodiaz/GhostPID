@@ -29,6 +29,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from sanitizer.blacklist import RULE_PREFIX, BlacklistError, Entity, append_entity, load_entities
 from sanitizer.rules import Config, ConfigError, check_overlaps, load_config
+from sanitizer.i18n import tr
 
 
 class EditError(ValueError):
@@ -96,13 +97,13 @@ class ConfigEditor:
     def _substitution(self, rule_id: str) -> Any:
         rule = next((r for r in self.config.substitutions if r.id == rule_id), None)
         if rule is None:
-            raise EditError(f"no hay ninguna sustitución con id '{rule_id}'")
+            raise EditError(tr("no hay ninguna sustitución con id '{id}'", "there is no substitution with id '{id}'", id=rule_id))
         return rule
 
     def _extend_list(self, block: str, rule_id: str, key: str, current: list[str], new: str) -> Config:
         new = " ".join(new.split())
         if not new:
-            raise EditError("texto vacío")
+            raise EditError(tr("texto vacío", "empty text"))
         if any(" ".join(x.split()).casefold() == new.casefold() for x in current):
             return self.config  # ya estaba
         data = self._read()
@@ -125,7 +126,7 @@ class ConfigEditor:
         """Añade una entidad al CSV del usuario de la lista negra."""
         policy = self.config.blacklist
         if not policy.user_file:
-            raise EditError("la config no define blacklist.user_file (CSV donde añadir)")
+            raise EditError(tr("la config no define blacklist.user_file (CSV donde añadir)", "the config does not define blacklist.user_file (CSV to add to)"))
         target = Path(policy.user_file)
         name = " ".join(name.split())
         before = target.read_bytes() if target.exists() else None
@@ -150,7 +151,7 @@ class ConfigEditor:
     def add_rule(self, rule_id: str, category: str, replacement: str, terms: list[str]) -> Config:
         """Crea una sustitución nueva con términos literales."""
         if any(r.id == rule_id for r in self.config.substitutions):
-            raise EditError(f"ya existe una sustitución con id '{rule_id}'")
+            raise EditError(tr("ya existe una sustitución con id '{id}'", "a substitution with id '{id}' already exists", id=rule_id))
         data = self._read()
         entry = self._rule_entry(data, "substitutions", rule_id)
         entry["category"] = category
@@ -174,7 +175,7 @@ class ConfigEditor:
                 n += 1
             zone_id = f"review_zone_{n}"
         elif zone_id in taken:
-            raise EditError(f"ya existe una zona con id '{zone_id}'")
+            raise EditError(tr("ya existe una zona con id '{id}'", "a zone with id '{id}' already exists", id=zone_id))
         data = self._read()
         entry = self._rule_entry(data, "zones", zone_id)
         if description:
@@ -189,7 +190,7 @@ class ConfigEditor:
     def set_logo(self, image_hash: str, remove: bool) -> Config:
         """Fija la decisión sobre un grupo de imágenes: eliminar siempre o conservar."""
         if not re.fullmatch(r"[0-9a-f]{16}", image_hash):
-            raise EditError(f"hash de imagen inválido: {image_hash!r}")
+            raise EditError(tr("hash de imagen inválido: {h}", "invalid image hash: {h}", h=repr(image_hash)))
         logos = self.config.logos
         target, other = ("remove", "keep") if remove else ("keep", "remove")
         data = self._read()
@@ -207,7 +208,7 @@ class ConfigEditor:
         """Desactiva una regla o zona (también si es heredada) con `disable`."""
         known = {r.id for r in (*self.config.whitelist, *self.config.substitutions, *self.config.zones)}
         if rule_id not in known:
-            raise EditError(f"no hay ninguna regla ni zona con id '{rule_id}'")
+            raise EditError(tr("no hay ninguna regla ni zona con id '{id}'", "there is no rule or zone with id '{id}'", id=rule_id))
         data = self._read()
         current = list(data.get("disable") or [])
         if rule_id not in current:

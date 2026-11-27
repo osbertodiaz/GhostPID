@@ -54,6 +54,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sanitizer.redact import ocr_normalize
+from sanitizer.i18n import tr
 
 COLUMNS = ("name", "aliases", "category", "segment", "industries", "country", "active", "notes")
 ALIAS_SEP = "|"
@@ -67,12 +68,17 @@ CATEGORIES: dict[str, tuple[str, str]] = {
     "manufacturer": ("manufacturer", "VENDOR-{n}"),
     "operator": ("operator", "OPR-{n}"),
 }
-CATEGORY_LABELS = {
-    "epc": "ingenierías y contratistas EPC",
-    "licensor": "licenciantes de tecnología",
-    "manufacturer": "fabricantes de equipos e instrumentos",
-    "operator": "operadores y propietarios de plantas",
+_CATEGORY_LABELS = {
+    "epc": ("ingenierías y contratistas EPC", "engineering firms and EPC contractors"),
+    "licensor": ("licenciantes de tecnología", "technology licensors"),
+    "manufacturer": ("fabricantes de equipos e instrumentos", "equipment and instrument manufacturers"),
+    "operator": ("operadores y propietarios de plantas", "plant operators and owners"),
 }
+
+
+def category_label(category: str) -> str:
+    """Descripción de una categoría del CSV en el idioma actual."""
+    return tr(*_CATEGORY_LABELS[category])
 _CATEGORY_SYNONYMS = {
     "ingenieria": "epc",
     "ingeniería": "epc",
@@ -155,7 +161,7 @@ class BlacklistPolicy(BaseModel):
     def _check_categories(cls, value: list[str]) -> list[str]:
         unknown = sorted(set(value) - set(CATEGORIES))
         if unknown:
-            raise ValueError(f"categorías desconocidas {unknown}; válidas: {list(CATEGORIES)}")
+            raise ValueError(tr("categorías desconocidas {unknown}; válidas: {valid}", "unknown categories {unknown}; valid: {valid}", unknown=unknown, valid=list(CATEGORIES)))
         return value
 
     @field_validator("replacements")
@@ -163,7 +169,7 @@ class BlacklistPolicy(BaseModel):
     def _check_replacements(cls, value: dict[str, str]) -> dict[str, str]:
         unknown = sorted(set(value) - set(CATEGORIES))
         if unknown:
-            raise ValueError(f"replacements para categorías desconocidas {unknown}")
+            raise ValueError(tr("replacements para categorías desconocidas {unknown}", "replacements for unknown categories {unknown}", unknown=unknown))
         return value
 
     @field_validator("industries")
@@ -171,7 +177,7 @@ class BlacklistPolicy(BaseModel):
     def _check_industries(cls, value: list[str]) -> list[str]:
         unknown = sorted(set(value) - set(INDUSTRIES))
         if unknown:
-            raise ValueError(f"industrias desconocidas {unknown}; válidas: {list(INDUSTRIES)}")
+            raise ValueError(tr("industrias desconocidas {unknown}; válidas: {valid}", "unknown industries {unknown}; valid: {valid}", unknown=unknown, valid=list(INDUSTRIES)))
         return value
 
     def paths(self) -> list[Path]:
@@ -240,13 +246,17 @@ def is_acronym(term: str) -> bool:
 def term_problem(term: str) -> str | None:
     """Motivo por el que un término no se admite en la lista negra, o None."""
     if len(term) < MIN_TERM_LENGTH:
-        return f"'{term}' es demasiado corto (mínimo {MIN_TERM_LENGTH} caracteres)"
+        return tr("'{term}' es demasiado corto (mínimo {n} caracteres)", "'{term}' is too short (minimum {n} characters)", term=term, n=MIN_TERM_LENGTH)
     if not any(c.isalpha() for c in term):
-        return f"'{term}' no tiene letras"
+        return tr("'{term}' no tiene letras", "'{term}' has no letters", term=term)
     plain = unicodedata.normalize("NFKD", term).encode("ascii", "ignore").decode().upper()
     words = [w for w in (re.sub(r"[^0-9A-Z]", "", w) for w in re.split(r"[\s\-/]+", plain)) if w]
     if words and all(w in PID_VOCABULARY for w in words):
-        return f"'{term}' es vocabulario de P&ID: usa una forma más específica (p. ej. el nombre completo)"
+        return tr(
+            "'{term}' es vocabulario de P&ID: usa una forma más específica (p. ej. el nombre completo)",
+            "'{term}' is P&ID vocabulary: use a more specific form (e.g. the full name)",
+            term=term,
+        )
     return None
 
 
@@ -270,7 +280,13 @@ def read_csv(path: Path) -> tuple[list[Entity], list[str]]:
     errors: list[str] = []
     missing = [c for c in ("name", "category") if c not in headers]
     if missing:
-        return [], [f"{path.name}: faltan columnas {missing} (cabecera: {', '.join(COLUMNS)})"]
+        return [], [
+            tr(
+                "{file}: faltan columnas {missing} (cabecera: {header})",
+                "{file}: missing columns {missing} (header: {header})",
+                file=path.name, missing=missing, header=", ".join(COLUMNS),
+            )
+        ]
     entities: list[Entity] = []
     for row in reader:
         line = reader.line_num
@@ -280,16 +296,34 @@ def read_csv(path: Path) -> tuple[list[Entity], list[str]]:
             continue
         category = _norm_category(row.get("category") or "")
         if category not in CATEGORIES:
-            errors.append(f"{where}: categoría '{row.get('category')}' desconocida (válidas: {', '.join(CATEGORIES)})")
+            errors.append(
+                tr(
+                    "{where}: categoría '{cat}' desconocida (válidas: {valid})",
+                    "{where}: unknown category '{cat}' (valid: {valid})",
+                    where=where, cat=row.get("category"), valid=", ".join(CATEGORIES),
+                )
+            )
             continue
         industries = tuple(i.lower() for i in _split(row.get("industries")))
         bad = [i for i in industries if i not in INDUSTRIES]
         if bad:
-            errors.append(f"{where}: industrias desconocidas {bad} (válidas: {', '.join(INDUSTRIES)})")
+            errors.append(
+                tr(
+                    "{where}: industrias desconocidas {bad} (válidas: {valid})",
+                    "{where}: unknown industries {bad} (valid: {valid})",
+                    where=where, bad=bad, valid=", ".join(INDUSTRIES),
+                )
+            )
             continue
         active_raw = (row.get("active") or "").strip().lower()
         if active_raw not in _TRUE | _FALSE:
-            errors.append(f"{where}: active debe ser sí o no, no '{row.get('active')}'")
+            errors.append(
+                tr(
+                    "{where}: active debe ser sí o no, no '{value}'",
+                    "{where}: active must be yes or no, not '{value}'",
+                    where=where, value=row.get("active"),
+                )
+            )
             continue
         aliases = tuple(a for a in _split(row.get("aliases")) if a.casefold() != name.casefold())
         entity = Entity(
@@ -319,7 +353,7 @@ def load_entities(paths: list[Path]) -> list[Entity]:
         try:
             found, errs = read_csv(path)
         except (OSError, UnicodeDecodeError, csv.Error) as exc:
-            errors.append(f"{path}: no se puede leer ({exc})")
+            errors.append(tr("{path}: no se puede leer ({exc})", "{path}: cannot be read ({exc})", path=path, exc=exc))
             continue
         entities += found
         errors += errs
@@ -334,8 +368,13 @@ def load_entities(paths: list[Path]) -> list[Entity]:
             other = owners.get(key)
             if other is not None:
                 errors.append(
-                    f"{entity.source}: '{term}' ya figura en '{other.name}' ({other.source}); "
-                    f"cada término solo puede pertenecer a una entidad"
+                    tr(
+                        "{src}: '{term}' ya figura en '{other}' ({other_src}); "
+                        "cada término solo puede pertenecer a una entidad",
+                        "{src}: '{term}' is already listed under '{other}' ({other_src}); "
+                        "each term can only belong to one entity",
+                        src=entity.source, term=term, other=other.name, other_src=other.source,
+                    )
                 )
             else:
                 owners[key] = entity
@@ -398,7 +437,11 @@ def build_rules(policy: BlacklistPolicy, overrides: dict[str, dict[str, Any]] | 
         rule = {
             "id": rule_id,
             "category": sub_category,
-            "description": f"Lista negra: {CATEGORY_LABELS[category]} ({len(members)} entidades)",
+            "description": tr(
+                "Lista negra: {label} ({n} entidades)",
+                "Blacklist: {label} ({n} entities)",
+                label=category_label(category), n=len(members),
+            ),
             "replacement": policy.replacements.get(category, replacement),
             "terms": terms,
             "entities": owners,
@@ -421,12 +464,20 @@ def append_entity(path: Path, entity: Entity, known: list[Entity] | None = None)
     """
     problems = [p for p in map(term_problem, entity.terms) if p]
     if entity.category not in CATEGORIES:
-        problems.append(f"categoría '{entity.category}' desconocida (válidas: {', '.join(CATEGORIES)})")
+        problems.append(
+            tr(
+                "categoría '{cat}' desconocida (válidas: {valid})",
+                "unknown category '{cat}' (valid: {valid})",
+                cat=entity.category, valid=", ".join(CATEGORIES),
+            )
+        )
     owners = {entity_key(t): e for e in (known or []) for t in e.terms}
     for term in entity.terms:
         if entity_key(term) in owners:
             other = owners[entity_key(term)]
-            problems.append(f"'{term}' ya figura en '{other.name}' ({other.source})")
+            problems.append(
+                tr("'{term}' ya figura en '{other}' ({src})", "'{term}' is already listed under '{other}' ({src})", term=term, other=other.name, src=other.source)
+            )
     if problems:
         raise BlacklistError(problems)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -470,31 +521,34 @@ def _policy_from(config_path: Path) -> BlacklistPolicy:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="blacklist",
-        description="Lista negra de la industria (CSV): consultar, comprobar y añadir empresas.",
+        description=tr(
+            "Lista negra de la industria (CSV): consultar, comprobar y añadir empresas.",
+            "Industry blacklist (CSV): look up, check and add companies.",
+        ),
     )
-    parser.add_argument("--config", type=Path, default=Path("configs/base.yaml"), help="config que declara la lista (por defecto configs/base.yaml)")
+    parser.add_argument("--config", type=Path, default=Path("configs/base.yaml"), help=tr("config que declara la lista (por defecto configs/base.yaml)", "config that declares the list (default configs/base.yaml)"))
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("stats", help="resumen por categoría, industria y fichero")
-    p_find = sub.add_parser("find", help="busca entidades por nombre, alias o segmento")
+    sub.add_parser("stats", help=tr("resumen por categoría, industria y fichero", "summary by category, industry and file"))
+    p_find = sub.add_parser("find", help=tr("busca entidades por nombre, alias o segmento", "search entities by name, alias or segment"))
     p_find.add_argument("text")
-    p_check = sub.add_parser("check", help="qué términos de la lista encajan en un texto")
+    p_check = sub.add_parser("check", help=tr("qué términos de la lista encajan en un texto", "which blacklist terms match a text"))
     p_check.add_argument("text", nargs="+")
-    p_add = sub.add_parser("add", help="añade una entidad al CSV del usuario (user_file)")
+    p_add = sub.add_parser("add", help=tr("añade una entidad al CSV del usuario (user_file)", "add an entity to the user CSV (user_file)"))
     p_add.add_argument("name")
     p_add.add_argument("--category", required=True, help=", ".join(CATEGORIES))
-    p_add.add_argument("--aliases", default="", help='separados por "|"')
+    p_add.add_argument("--aliases", default="", help=tr('separados por "|"', 'separated by "|"'))
     p_add.add_argument("--segment", default="")
     p_add.add_argument("--industries", default="", help=" | ".join(INDUSTRIES))
     p_add.add_argument("--country", default="")
     p_add.add_argument("--notes", default="")
-    p_add.add_argument("--file", type=Path, help="CSV de destino (por defecto user_file de la config)")
+    p_add.add_argument("--file", type=Path, help=tr("CSV de destino (por defecto user_file de la config)", "target CSV (default: the config's user_file)"))
     args = parser.parse_args(argv)
 
     try:
         policy = _policy_from(args.config)
         entities = load_entities(policy.paths())
     except BlacklistError as exc:
-        print("ERROR en la lista negra:", file=sys.stderr)
+        print(tr("ERROR en la lista negra:", "ERROR in the blacklist:"), file=sys.stderr)
         for m in exc.messages:
             print(f"  - {m}", file=sys.stderr)
         return 1
@@ -504,19 +558,29 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "stats":
         files = policy.paths()
-        print(f"Lista negra: {len(entities)} entidades, {sum(len(e.terms) for e in entities)} términos")
-        print(f"  activa: {'sí' if policy.enabled else 'no'} · categorías: {', '.join(policy.categories)}")
+        print(
+            tr(
+                "Lista negra: {e} entidades, {t} términos",
+                "Blacklist: {e} entities, {t} terms",
+                e=len(entities), t=sum(len(e.terms) for e in entities),
+            )
+        )
+        yes, no = tr("sí", "yes"), "no"
+        print(
+            tr("  activa: {on} · categorías: {cats}", "  enabled: {on} · categories: {cats}", on=yes if policy.enabled else no, cats=", ".join(policy.categories))
+        )
         for f in files:
-            print(f"  fichero: {f} ({sum(1 for e in entities if e.source.startswith(f.name + ':'))} entidades)")
+            n = sum(1 for e in entities if e.source.startswith(f.name + ":"))
+            print(tr("  fichero: {f} ({n} entidades)", "  file: {f} ({n} entities)", f=f, n=n))
         for cat in CATEGORIES:
             n = sum(1 for e in entities if e.category == cat)
-            print(f"  {cat:<13} {n:>5}  {CATEGORY_LABELS[cat]}")
+            print(f"  {cat:<13} {n:>5}  {category_label(cat)}")
         for ind in INDUSTRIES:
             n = sum(1 for e in entities if ind in e.industries)
             print(f"  · {ind:<11} {n:>5}")
         inactive = sum(1 for e in entities if not e.active)
         if inactive:
-            print(f"  desactivadas: {inactive}")
+            print(tr("  desactivadas: {n}", "  disabled: {n}", n=inactive))
         return 0
 
     if args.cmd == "find":
@@ -526,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
             alias = f" ({', '.join(e.aliases)})" if e.aliases else ""
             print(f"{e.category:<13} {e.name}{alias} · {e.segment} · {e.country} · {e.source}")
         if not hits:
-            print("(sin resultados)")
+            print(tr("(sin resultados)", "(no results)"))
         return 0
 
     if args.cmd == "check":
@@ -542,13 +606,13 @@ def main(argv: list[str] | None = None) -> int:
                     found = True
                     print(f"  '{m.group(0)}' → {rule.entity_of(m.group(0))} [{rule.id} → {rule.replacement}]")
         if not found:
-            print("  (ningún término de la lista negra encaja)")
+            print(tr("  (ningún término de la lista negra encaja)", "  (no blacklist term matches)"))
         return 0
 
     # add
     target = args.file or (Path(policy.user_file) if policy.user_file else None)
     if target is None:
-        print("ERROR: la config no define blacklist.user_file; indica --file", file=sys.stderr)
+        print(tr("ERROR: la config no define blacklist.user_file; indica --file", "ERROR: the config does not define blacklist.user_file; pass --file"), file=sys.stderr)
         return 1
     entity = Entity(
         name=" ".join(args.name.split()),
@@ -561,7 +625,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     bad = [i for i in entity.industries if i not in INDUSTRIES]
     if bad:
-        print(f"ERROR: industrias desconocidas {bad}", file=sys.stderr)
+        print(tr("ERROR: industrias desconocidas {bad}", "ERROR: unknown industries {bad}", bad=bad), file=sys.stderr)
         return 1
     try:
         append_entity(target, entity, entities)
@@ -569,9 +633,15 @@ def main(argv: list[str] | None = None) -> int:
         for m in exc.messages:
             print(f"ERROR: {m}", file=sys.stderr)
         return 1
-    print(f"Añadida '{entity.name}' ({entity.category}) a {target}")
+    print(tr("Añadida '{name}' ({cat}) a {target}", "Added '{name}' ({cat}) to {target}", name=entity.name, cat=entity.category, target=target))
     if not any(Path(target).resolve() == p.resolve() for p in policy.paths()) and Path(target).resolve() != Path(policy.user_file or "").resolve():
-        print("  ojo: ese fichero no está en blacklist.files de la config; no se cargará", file=sys.stderr)
+        print(
+            tr(
+                "  ojo: ese fichero no está en blacklist.files de la config; no se cargará",
+                "  note: that file is not in the config's blacklist.files; it will not be loaded",
+            ),
+            file=sys.stderr,
+        )
     return 0
 
 

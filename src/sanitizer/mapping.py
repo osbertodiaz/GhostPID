@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from sanitizer.redact import Namer, ocr_normalize
+from sanitizer.i18n import tr
 
 MAP_VERSION = 1
 
@@ -78,17 +79,17 @@ def load_map(path: str | Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise MapError(f"no existe el mapa {path}") from None
+        raise MapError(tr("no existe el mapa {path}", "map {path} does not exist", path=path)) from None
     except json.JSONDecodeError as exc:
-        raise MapError(f"{path}: JSON mal formado: {exc}") from None
+        raise MapError(tr("{path}: JSON mal formado: {exc}", "{path}: malformed JSON: {exc}", path=path, exc=exc)) from None
     if not isinstance(data, dict) or data.get("version") != MAP_VERSION:
-        raise MapError(f"{path}: no es un mapa de sustitución (versión {MAP_VERSION})")
+        raise MapError(tr("{path}: no es un mapa de sustitución (versión {v})", "{path}: not a substitution map (version {v})", path=path, v=MAP_VERSION))
     for key in ("documents", "entries"):
         if not isinstance(data.get(key), (list if key == "documents" else dict)):
-            raise MapError(f"{path}: falta o es inválido '{key}'")
+            raise MapError(tr("{path}: falta o es inválido '{key}'", "{path}: '{key}' is missing or invalid", path=path, key=key))
     for value, entry in data["entries"].items():
         if not isinstance(entry, dict) or "template" not in entry or not isinstance(entry.get("originals"), dict):
-            raise MapError(f"{path}: entrada inválida para '{value}'")
+            raise MapError(tr("{path}: entrada inválida para '{value}'", "{path}: invalid entry for '{value}'", path=path, value=value))
     return data
 
 
@@ -97,7 +98,11 @@ def save_map(data: dict[str, Any], path: str | Path) -> Path:
     path = Path(path)
     if not inside_data(path):
         raise MapError(
-            f"el mapa contiene los valores originales: solo se guarda dentro de data/ (no en {path})"
+            tr(
+                "el mapa contiene los valores originales: solo se guarda dentro de data/ (no en {path})",
+                "the map contains the original values: it is only saved inside data/ (not in {path})",
+                path=path,
+            )
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -225,11 +230,14 @@ def revert(text: str, data: dict[str, Any]) -> tuple[str, RevertReport]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="revert",
-        description="Devuelve los nombres reales a un texto escrito con denominaciones genéricas.",
+        description=tr(
+            "Devuelve los nombres reales a un texto escrito con denominaciones genéricas.",
+            "Restores the real names in a text written with generic designations.",
+        ),
     )
-    parser.add_argument("--map", type=Path, required=True, help="mapa de sustitución (data/maps/…)")
-    parser.add_argument("input", nargs="?", type=Path, help="fichero de texto (por defecto, la entrada estándar)")
-    parser.add_argument("-o", "--output", type=Path, help="fichero de salida (por defecto, la salida estándar)")
+    parser.add_argument("--map", type=Path, required=True, help=tr("mapa de sustitución (data/maps/…)", "substitution map (data/maps/…)"))
+    parser.add_argument("input", nargs="?", type=Path, help=tr("fichero de texto (por defecto, la entrada estándar)", "text file (default: standard input)"))
+    parser.add_argument("-o", "--output", type=Path, help=tr("fichero de salida (por defecto, la salida estándar)", "output file (default: standard output)"))
     args = parser.parse_args(argv)
 
     try:
@@ -245,12 +253,16 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(result)
 
     total = sum(report.counts.values())
-    print(f"revertidas: {total} ({', '.join(f'{k} ×{v}' for k, v in report.counts.items()) or '-'})", file=sys.stderr)
+    detail = ", ".join(f"{k} ×{v}" for k, v in report.counts.items()) or "-"
+    print(tr("revertidas: {n} ({detail})", "reverted: {n} ({detail})", n=total, detail=detail), file=sys.stderr)
     for value, groups in report.ambiguous.items():
         if value in report.counts:
             print(
-                f"AVISO: '{value}' agrupa varias entidades ({' | '.join(groups)}); "
-                f"se ha usado '{canonical(data['entries'][value])}'",
+                tr(
+                    "AVISO: '{value}' agrupa varias entidades ({groups}); se ha usado '{used}'",
+                    "WARNING: '{value}' groups several entities ({groups}); '{used}' was used",
+                    value=value, groups=" | ".join(groups), used=canonical(data["entries"][value]),
+                ),
                 file=sys.stderr,
             )
     return 0

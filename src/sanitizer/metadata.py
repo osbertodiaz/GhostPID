@@ -43,6 +43,8 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, Stream, String
 from pydantic import ConfigDict
 
+from sanitizer.i18n import tr
+
 # /ID fijo que escribe qpdf con static_id
 STATIC_ID = bytes.fromhex("31415926535897932384626433832795")
 
@@ -117,7 +119,7 @@ class MetadataPolicy:
             try:
                 value.format(**sample)
             except (KeyError, IndexError, ValueError) as exc:
-                raise ValueError(f"{name} mal formado ({value!r}): {exc}") from None
+                raise ValueError(tr("{name} mal formado ({value}): {exc}", "malformed {name} ({value}): {exc}", name=name, value=repr(value), exc=exc)) from None
 
 
 DEFAULT_POLICY = MetadataPolicy()
@@ -165,7 +167,7 @@ def clean_metadata(
     """Limpia los metadatos de `src` y guarda el resultado en `dst`."""
     src, dst = Path(src), Path(dst)
     if src.resolve() == dst.resolve():
-        raise ValueError("la salida no puede sobrescribir el PDF original")
+        raise ValueError(tr("la salida no puede sobrescribir el PDF original", "the output cannot overwrite the original PDF"))
 
     report = CleanReport()
     with pikepdf.open(src) as pdf:
@@ -548,51 +550,51 @@ def verify_metadata(path: str | Path, policy: MetadataPolicy = DEFAULT_POLICY) -
 
     with pikepdf.open(path) as pdf:
         if "/Info" in pdf.trailer:
-            problems.append("el trailer tiene diccionario /Info")
+            problems.append(tr("el trailer tiene diccionario /Info", "the trailer has an /Info dictionary"))
         ids = pdf.trailer.get("/ID")
         if ids is not None and any(bytes(x) != STATIC_ID for x in ids):
-            problems.append("el /ID del documento no es el valor fijo anónimo")
+            problems.append(tr("el /ID del documento no es el valor fijo anónimo", "the document /ID is not the fixed anonymous value"))
         for key in CATALOG_KEYS:
             if key in pdf.Root:
-                problems.append(f"el catálogo conserva {key}")
+                problems.append(tr("el catálogo conserva {key}", "the catalog keeps {key}", key=key))
         names = pdf.Root.get("/Names")
         if isinstance(names, Dictionary):
             for key in ("/JavaScript", "/EmbeddedFiles", "/Dests"):
                 if key in names:
-                    problems.append(f"el árbol /Names conserva {key}")
+                    problems.append(tr("el árbol /Names conserva {key}", "the /Names tree keeps {key}", key=key))
         action = pdf.Root.get("/OpenAction")
         if isinstance(action, Dictionary) and str(action.get("/S")) not in SAFE_ACTIONS:
-            problems.append("el catálogo tiene /OpenAction no interno")
+            problems.append(tr("el catálogo tiene /OpenAction no interno", "the catalog has a non-internal /OpenAction"))
 
         field_rx = _template_regex(policy.field_name)
         tree = {p.obj.objgen for p in pdf.pages}
         acro = pdf.Root.get("/AcroForm")
         if isinstance(acro, Dictionary) and "/XFA" in acro:
-            problems.append("el formulario conserva XFA")
+            problems.append(tr("el formulario conserva XFA", "the form keeps XFA"))
         for obj in pdf.objects:
             if not isinstance(obj, (Dictionary, Stream)):
                 continue
             for key in PRIVATE_KEYS:
                 if key in obj:
-                    problems.append(f"objeto {obj.objgen} conserva {key}")
+                    problems.append(tr("objeto {obj} conserva {key}", "object {obj} keeps {key}", obj=obj.objgen, key=key))
             if policy.layers == "rename" and obj.get("/Type") == Name.OCG:
                 name = str(obj.get("/Name", ""))
                 if not layer_rx.fullmatch(name):
-                    problems.append(f"capa con nombre no genérico: {name!r}")
+                    problems.append(tr("capa con nombre no genérico: {name}", "layer with a non-generic name: {name}", name=repr(name)))
             if obj.get("/Type") == Name.Page and obj.objgen not in tree:
-                problems.append(f"página fantasma {obj.objgen} fuera del árbol de páginas")
+                problems.append(tr("página fantasma {obj} fuera del árbol de páginas", "ghost page {obj} outside the page tree", obj=obj.objgen))
             is_field = "/FT" in obj or obj.get("/Subtype") == Name.Widget
             if is_field and "/T" in obj and not field_rx.fullmatch(str(obj.T)):
-                problems.append(f"campo de formulario con nombre no genérico: {str(obj.T)!r}")
+                problems.append(tr("campo de formulario con nombre no genérico: {name}", "form field with a non-generic name: {name}", name=repr(str(obj.T))))
             if is_field and any(k in obj for k in ("/TU", "/TM")):
-                problems.append(f"campo de formulario {obj.objgen} conserva /TU o /TM")
+                problems.append(tr("campo de formulario {obj} conserva /TU o /TM", "form field {obj} keeps /TU or /TM", obj=obj.objgen))
             if "/JS" in obj or str(obj.get("/S")) == "/JavaScript":
-                problems.append(f"objeto {obj.objgen} contiene JavaScript")
+                problems.append(tr("objeto {obj} contiene JavaScript", "object {obj} contains JavaScript", obj=obj.objgen))
 
         for number, page in enumerate(pdf.pages, start=1):
             for key in PAGE_KEYS:
                 if key in page.obj:
-                    problems.append(f"página {number} conserva {key}")
+                    problems.append(tr("página {n} conserva {key}", "page {n} keeps {key}", n=number, key=key))
             for annot in page.obj.get("/Annots", Array()):
                 problems += _verify_annotation(annot, number, policy)
 
@@ -602,16 +604,16 @@ def verify_metadata(path: str | Path, policy: MetadataPolicy = DEFAULT_POLICY) -
                 if isinstance(cfg, Dictionary):
                     for label in _order_strings(cfg.get("/Order")):
                         if not group_rx.fullmatch(label):
-                            problems.append(f"grupo de capas con nombre no genérico: {label!r}")
+                            problems.append(tr("grupo de capas con nombre no genérico: {label}", "layer group with a non-generic name: {label}", label=repr(label)))
 
         if "/Outlines" in pdf.Root:
             if policy.outline == "remove":
-                problems.append("quedan marcadores")
+                problems.append(tr("quedan marcadores", "bookmarks remain"))
             elif policy.outline == "generic":
                 for item in _outline_items(pdf.Root.Outlines):
                     title = str(item.get("/Title", ""))
                     if not any(rx.fullmatch(title) for rx in title_rxs):
-                        problems.append(f"marcador con título no genérico: {title!r}")
+                        problems.append(tr("marcador con título no genérico: {title}", "bookmark with a non-generic title: {title}", title=repr(title)))
     return problems
 
 
@@ -619,27 +621,27 @@ def _verify_annotation(annot: Any, page: int, policy: MetadataPolicy) -> list[st
     if not isinstance(annot, Dictionary):
         return []
     subtype = str(annot.get("/Subtype", "/Unknown"))
-    where = f"página {page}: anotación {subtype.lstrip('/')}"
+    where = tr("página {p}: anotación {s}", "page {p}: {s} annotation", p=page, s=subtype.lstrip("/"))
     if subtype in ALWAYS_REMOVED_ANNOTS:
-        return [f"{where} (adjunto o multimedia) no eliminada"]
+        return [tr("{where} (adjunto o multimedia) no eliminada", "{where} (attachment or multimedia) not removed", where=where)]
     if subtype == "/Link":
         if policy.links == "remove" or policy.annotations == "remove":
-            return [f"{where} no eliminada"]
+            return [tr("{where} no eliminada", "{where} not removed", where=where)]
         if "/A" in annot or "/Dest" not in annot:
-            return [f"{where} con acción no interna"]
+            return [tr("{where} con acción no interna", "{where} with a non-internal action", where=where)]
         return []
     if policy.annotations == "remove":
-        return [f"{where} no eliminada"]
+        return [tr("{where} no eliminada", "{where} not removed", where=where)]
     problems = []
     if policy.annotations == "strip_authors":
         keys = WIDGET_KEYS if subtype == "/Widget" else AUTHOR_KEYS
         left = [k for k in keys if k in annot]
         if left:
-            problems.append(f"{where} conserva {', '.join(left)}")
+            problems.append(tr("{where} conserva {keys}", "{where} keeps {keys}", where=where, keys=", ".join(left)))
         if subtype == "/Popup" or "/State" in annot or "/StateModel" in annot:
-            problems.append(f"{where} de revisión no eliminada")
+            problems.append(tr("{where} de revisión no eliminada", "review {where} not removed", where=where))
     if "/AA" in annot:
-        problems.append(f"{where} conserva acciones /AA")
+        problems.append(tr("{where} conserva acciones /AA", "{where} keeps /AA actions", where=where))
     return problems
 
 
@@ -665,11 +667,14 @@ def _template_regex(template: str) -> re.Pattern[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="clean-metadata",
-        description="Elimina metadatos, adjuntos, JavaScript, autoría de anotaciones, nombres de capas…",
+        description=tr(
+            "Elimina metadatos, adjuntos, JavaScript, autoría de anotaciones, nombres de capas…",
+            "Removes metadata, attachments, JavaScript, annotation authorship, layer names…",
+        ),
     )
-    parser.add_argument("pdf", type=Path, help="PDF de entrada")
-    parser.add_argument("-o", "--output", type=Path, required=True, help="PDF de salida")
-    parser.add_argument("--config", type=Path, help="config YAML de cliente (bloque metadata)")
+    parser.add_argument("pdf", type=Path, help=tr("PDF de entrada", "input PDF"))
+    parser.add_argument("-o", "--output", type=Path, required=True, help=tr("PDF de salida", "output PDF"))
+    parser.add_argument("--config", type=Path, help=tr("config YAML de cliente (bloque metadata)", "client YAML config (metadata block)"))
     args = parser.parse_args(argv)
 
     policy = DEFAULT_POLICY
@@ -679,7 +684,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             policy = load_config(args.config).metadata
         except ConfigError as exc:
-            parser.error(f"config inválida: {exc}")
+            parser.error(tr("config inválida: {exc}", "invalid config: {exc}", exc=exc))
 
     try:
         report = clean_metadata(args.pdf, args.output, policy)
@@ -687,24 +692,40 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    removed = ", ".join(f"{k} ×{v}" for k, v in report.annotations_removed.items()) or "ninguna"
+    removed = ", ".join(f"{k} ×{v}" for k, v in report.annotations_removed.items()) or tr("ninguna", "none")
     print(f"{args.pdf} → {args.output}")
-    print(f"  Info: {len(report.info_keys)} claves · XMP: {report.xmp_streams} · /ID sustituido: {'sí' if report.document_id_replaced else 'no'}")
-    print(f"  datos privados (PieceInfo, OPI…): {report.private_keys} · catálogo: {', '.join(report.catalog_keys) or '-'}")
-    print(f"  adjuntos: {report.embedded_files} · JavaScript: {report.javascript} · acciones: {report.actions}")
-    print(f"  anotaciones eliminadas: {removed} · sin autoría: {report.annotations_stripped}")
+    replaced = tr("sí", "yes") if report.document_id_replaced else "no"
+    print(tr("  Info: {k} claves · XMP: {x} · /ID sustituido: {r}", "  Info: {k} keys · XMP: {x} · /ID replaced: {r}", k=len(report.info_keys), x=report.xmp_streams, r=replaced))
     print(
-        f"  capas renombradas: {report.layers_renamed} · campos de formulario: {report.fields_renamed}"
-        f" · marcadores: {report.outline_items}"
+        tr(
+            "  datos privados (PieceInfo, OPI…): {p} · catálogo: {c}",
+            "  private data (PieceInfo, OPI…): {p} · catalog: {c}",
+            p=report.private_keys, c=", ".join(report.catalog_keys) or "-",
+        )
+    )
+    print(
+        tr(
+            "  adjuntos: {e} · JavaScript: {j} · acciones: {a}",
+            "  attachments: {e} · JavaScript: {j} · actions: {a}",
+            e=report.embedded_files, j=report.javascript, a=report.actions,
+        )
+    )
+    print(tr("  anotaciones eliminadas: {r} · sin autoría: {s}", "  annotations removed: {r} · authorship stripped: {s}", r=removed, s=report.annotations_stripped))
+    print(
+        tr(
+            "  capas renombradas: {l} · campos de formulario: {f} · marcadores: {o}",
+            "  layers renamed: {l} · form fields: {f} · bookmarks: {o}",
+            l=report.layers_renamed, f=report.fields_renamed, o=report.outline_items,
+        )
     )
 
     problems = verify_metadata(args.output, policy)
     if problems:
-        print("VERIFICACIÓN FALLIDA:", file=sys.stderr)
+        print(tr("VERIFICACIÓN FALLIDA:", "VERIFICATION FAILED:"), file=sys.stderr)
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         return 1
-    print("  verificación (relectura con pikepdf): OK")
+    print(tr("  verificación (relectura con pikepdf): OK", "  verification (re-read with pikepdf): OK"))
     return 0
 
 
