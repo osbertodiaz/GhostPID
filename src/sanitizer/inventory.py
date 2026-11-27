@@ -196,17 +196,11 @@ def _javascript(doc: pymupdf.Document) -> dict[str, Any]:
 
 def _page_info(page: pymupdf.Page, detection: DetectionParams) -> dict[str, Any]:
     rect = page.rect
-    page_area = rect.width * rect.height or 1.0
 
     words = page.get_text("words")
-    visible_chars, invisible_chars = _text_visibility(page)
+    visible_chars, invisible_chars = text_visibility(page)
     images = page.get_image_info()
-    covered = 0.0
-    for img in images:
-        bbox = pymupdf.Rect(img["bbox"]) & rect  # recortar a la página
-        if not bbox.is_empty:
-            covered += bbox.width * bbox.height
-    coverage = min(covered / page_area, 1.0)
+    coverage = image_coverage(page, images)
 
     cdrawings = page.get_cdrawings()
     drawings = len(cdrawings)
@@ -245,7 +239,19 @@ def _page_info(page: pymupdf.Page, detection: DetectionParams) -> dict[str, Any]
     }
 
 
-def _text_visibility(page: pymupdf.Page) -> tuple[int, int]:
+def image_coverage(page: pymupdf.Page, images: list[dict[str, Any]] | None = None) -> float:
+    """Fracción de la página cubierta por imágenes (0–1)."""
+    rect = page.rect
+    page_area = rect.width * rect.height or 1.0
+    covered = 0.0
+    for img in images if images is not None else page.get_image_info():
+        bbox = pymupdf.Rect(img["bbox"]) & rect  # recortar a la página
+        if not bbox.is_empty:
+            covered += bbox.width * bbox.height
+    return min(covered / page_area, 1.0)
+
+
+def text_visibility(page: pymupdf.Page) -> tuple[int, int]:
     """Caracteres visibles e invisibles (modo de render 3 u opacidad 0).
 
     El texto invisible es típico de la capa OCR de un escaneado: no se ve,
