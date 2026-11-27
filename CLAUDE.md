@@ -1,4 +1,4 @@
-# PID_Anonymouse
+# GhostPID
 
 Herramienta Python local para anonimizar P&ID y PFD en PDF antes de usarlos con LLMs.
 

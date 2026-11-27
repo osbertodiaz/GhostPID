@@ -152,6 +152,51 @@ wheels = [
 ]
 
 [[package]]
+name = "ghostpid"
+version = "0.1.1"
+source = { editable = "." }
+dependencies = [
+    { name = "opencv-python" },
+    { name = "pdfplumber" },
+    { name = "pikepdf" },
+    { name = "pydantic" },
+    { name = "pymupdf" },
+    { name = "pyqt6" },
+    { name = "pytesseract" },
+    { name = "pyyaml" },
+    { name = "ruamel-yaml" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyinstaller" },
+    { name = "pytest" },
+    { name = "pytest-qt" },
+    { name = "reportlab" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "opencv-python", specifier = ">=4.10" },
+    { name = "pdfplumber", specifier = ">=0.11" },
+    { name = "pikepdf", specifier = ">=9.0" },
+    { name = "pydantic", specifier = ">=2.14.4" },
+    { name = "pymupdf", specifier = ">=1.24" },
+    { name = "pyqt6", specifier = ">=6.12.1" },
+    { name = "pytesseract", specifier = ">=0.3.13" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruamel-yaml", specifier = ">=0.19.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyinstaller", specifier = ">=6.22.3" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-qt", specifier = ">=4.5.0" },
+    { name = "reportlab", specifier = ">=4.2" },
+]
+
+[[package]]
 name = "iniconfig"
 version = "2.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -307,51 +352,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/03/4f/2750f7f6f025a1507cd3b7218691671eecfd0bbebebe8b39aa0fe1d360b8/pefile-2024.8.26.tar.gz", hash = "sha256:3ff6c5d8b43e8c37bb6e6dd5085658d658a7a0bdcd20b6a07b1fcfc1c4e9d632", size = 76008, upload-time = "2024-08-26T20:58:38.155Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/16/12b82f791c7f50ddec566873d5bdd245baa1491bac11d15ffb98aecc8f8b/pefile-2024.8.26-py3-none-any.whl", hash = "sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f", size = 74766, upload-time = "2024-08-26T21:01:02.632Z" },
-]
-
-[[package]]
-name = "pid-anonymouse"
-version = "0.1.1"
-source = { editable = "." }
-dependencies = [
-    { name = "opencv-python" },
-    { name = "pdfplumber" },
-    { name = "pikepdf" },
-    { name = "pydantic" },
-    { name = "pymupdf" },
-    { name = "pyqt6" },
-    { name = "pytesseract" },
-    { name = "pyyaml" },
-    { name = "ruamel-yaml" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pyinstaller" },
-    { name = "pytest" },
-    { name = "pytest-qt" },
-    { name = "reportlab" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "opencv-python", specifier = ">=4.10" },
-    { name = "pdfplumber", specifier = ">=0.11" },
-    { name = "pikepdf", specifier = ">=9.0" },
-    { name = "pydantic", specifier = ">=2.14.4" },
-    { name = "pymupdf", specifier = ">=1.24" },
-    { name = "pyqt6", specifier = ">=6.12.1" },
-    { name = "pytesseract", specifier = ">=0.3.13" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "ruamel-yaml", specifier = ">=0.19.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pyinstaller", specifier = ">=6.22.3" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-qt", specifier = ">=4.5.0" },
-    { name = "reportlab", specifier = ">=4.2" },
 ]
 
 [[package]]

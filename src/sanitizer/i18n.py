@@ -9,7 +9,7 @@ mismos en ambos textos: `tr("{n} páginas", "{n} pages", n=3)`.
 
 Detección (`current_language()`), por orden:
 
-1. `PID_ANONYMOUSE_LANG=es|en` (tests y soporte).
+1. `GHOSTPID_LANG=es|en` (tests y soporte).
 2. Idioma de la interfaz del sistema: en macOS `AppleLanguages` de las
    preferencias globales (lo mismo que usa `QLocale.system()`), en Windows
    `GetUserDefaultUILanguage`.
@@ -28,7 +28,9 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-ENV_VAR = "PID_ANONYMOUSE_LANG"
+ENV_VAR = "GHOSTPID_LANG"
+# Nombre anterior del proyecto (PID_Anonymouse); se sigue aceptando.
+LEGACY_ENV_VAR = "PID_ANONYMOUSE_LANG"
 LANGUAGES = ("es", "en")
 
 
@@ -91,8 +93,8 @@ def system_language() -> str:
 
 
 def current_language() -> str:
-    """'es' o 'en': la variable `PID_ANONYMOUSE_LANG` manda; si no, el idioma del sistema."""
-    forced = os.environ.get(ENV_VAR, "").strip().lower()
+    """'es' o 'en': la variable `GHOSTPID_LANG` manda; si no, el idioma del sistema."""
+    forced = (os.environ.get(ENV_VAR) or os.environ.get(LEGACY_ENV_VAR, "")).strip().lower()
     if forced in LANGUAGES:
         return forced
     return system_language()

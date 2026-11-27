@@ -1,6 +1,6 @@
-# Manual de uso de PID Anonymouse
+# Manual de uso de GhostPID
 
-PID Anonymouse quita de los P&ID y PFD en PDF lo que identifica al cliente
+GhostPID quita de los P&ID y PFD en PDF lo que identifica al cliente
 antes de pasárselos a un LLM. Elimina empresas, operador, fabricantes,
 ubicación, códigos de proyecto, referencias a otros documentos, autores,
 logos, cajetines y metadatos. Conserva todo lo técnico: equipos, tags de
@@ -17,7 +17,7 @@ notas.
 > **Idioma.** La app y los comandos siguen el idioma del sistema operativo:
 > español si está en español (cualquier `es_*`) e inglés en cualquier otro
 > caso. Para forzar uno, define la variable de entorno
-> `PID_ANONYMOUSE_LANG=es` o `PID_ANONYMOUSE_LANG=en`. English manual:
+> `GHOSTPID_LANG=es` o `GHOSTPID_LANG=en`. English manual:
 > [MANUAL.en.md](MANUAL.en.md).
 
 ---
@@ -26,11 +26,11 @@ notas.
 
 ### Windows (descarga)
 
-1. Descarga `PID-Anonymouse-windows-x64.zip` desde la página de
-   [Releases](https://github.com/osbertodiaz/PID_Anonymouse/releases).
+1. Descarga `GhostPID-windows-x64.zip` desde la página de
+   [Releases](https://github.com/osbertodiaz/GhostPID/releases).
 2. Descomprímelo en una carpeta donde puedas escribir, por ejemplo
-   `Documentos\PID Anonymouse`. No lo ejecutes desde dentro del zip.
-3. Abre `PID Anonymouse.exe`. La app no está firmada, así que Windows
+   `Documentos\GhostPID`. No lo ejecutes desde dentro del zip.
+3. Abre `GhostPID.exe`. La app no está firmada, así que Windows
    SmartScreen puede avisar: pulsa **Más información** y después
    **Ejecutar de todas formas**.
 
@@ -43,13 +43,13 @@ Necesitas [uv](https://docs.astral.sh/uv/) y Tesseract:
 
 ```bash
 brew install uv tesseract tesseract-lang
-git clone https://github.com/osbertodiaz/PID_Anonymouse.git
-cd PID_Anonymouse
+git clone https://github.com/osbertodiaz/GhostPID.git
+cd GhostPID
 uv sync
 ./scripts/build_app.sh
 ```
 
-La app queda en `dist/PID Anonymouse.app`. Ábrela desde ahí: trabaja con las
+La app queda en `dist/GhostPID.app`. Ábrela desde ahí: trabaja con las
 carpetas `data/` y `configs/` del proyecto, así que no la muevas a
 Aplicaciones.
 
@@ -370,7 +370,7 @@ varias ubicaciones. `revert` solo está disponible desde la línea de comandos.
 | "Cambio rechazado" al añadir algo | El cambio dejaría la config inválida (p. ej. un término que es a la vez excepción). Lee el mensaje; la config no se ha tocado |
 | El proceso es lento | Es normal con muchas páginas escaneadas: el OCR se repite para no dejar restos. Mientras ajustas reglas, usa **Recalcular** (sin OCR) |
 | Quiero deshacer el último cambio de la config | Copia `configs/<cliente>.yaml.bak` sobre `configs/<cliente>.yaml` |
-| La app sale en otro idioma | Define `PID_ANONYMOUSE_LANG=es` (o `en`) antes de abrirla |
+| La app sale en otro idioma | Define `GHOSTPID_LANG=es` (o `en`) antes de abrirla |
 
 ---
 

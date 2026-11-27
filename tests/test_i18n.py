@@ -66,6 +66,15 @@ def test_env_override_wins(monkeypatch):
     assert i18n.tr("{n} páginas", "{n} pages", n=3) == "3 páginas"
 
 
+def test_legacy_env_var_still_works(monkeypatch):
+    monkeypatch.setattr(i18n, "system_language", lambda: "es")
+    monkeypatch.delenv(i18n.ENV_VAR, raising=False)
+    monkeypatch.setenv(i18n.LEGACY_ENV_VAR, "en")
+    assert i18n.current_language() == "en"
+    monkeypatch.setenv(i18n.ENV_VAR, "es")
+    assert i18n.current_language() == "es"
+
+
 def test_invalid_override_falls_back_to_system(monkeypatch):
     monkeypatch.setattr(i18n, "system_language", lambda: "en")
     monkeypatch.setenv(i18n.ENV_VAR, "fr")

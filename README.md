@@ -1,4 +1,7 @@
-# PID_Anonymouse
+# GhostPID
+
+> Antes se llamaba PID_Anonymouse. Las variables `PID_ANONYMOUSE_LANG` y
+> `PID_ANONYMOUSE_SELFTEST` se siguen aceptando.
 
 Herramienta Python que corre en local para anonimizar P&ID y PFD en PDF antes de
 pasarlos a cualquier LLM. Elimina la información sensible (empresa, cajetín,
@@ -22,7 +25,7 @@ comandos, los mensajes de error de la config y los informes Markdown salen en
 hay, las variables `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` y `LANG`. Para forzarlo:
 
 ```bash
-PID_ANONYMOUSE_LANG=en uv run validate-config configs/example.yaml
+GHOSTPID_LANG=en uv run validate-config configs/example.yaml
 ```
 
 No se traducen las claves YAML, los ids de reglas, las categorías
@@ -378,9 +381,9 @@ quedan marcadas como desactualizadas hasta «Recalcular». La UI no edita
 
 ## App de escritorio
 
-**Windows**: descarga `PID-Anonymouse-windows-x64.zip` de la página de
-[Releases](https://github.com/osbertodiaz/PID_Anonymouse/releases), descomprímelo
-y abre `PID Anonymouse.exe`. No hace falta instalar nada: el OCR (tesseract
+**Windows**: descarga `GhostPID-windows-x64.zip` de la página de
+[Releases](https://github.com/osbertodiaz/GhostPID/releases), descomprímelo
+y abre `GhostPID.exe`. No hace falta instalar nada: el OCR (tesseract
 con inglés y español) va incluido. `data/` y `configs/` se crean junto al
 .exe. La construye el workflow `.github/workflows/windows.yml` al subir un
 tag `v*`; también se puede lanzar a mano desde Actions.
@@ -388,12 +391,12 @@ tag `v*`; también se puede lanzar a mano desde Actions.
 **macOS** (desde el código, con tesseract de Homebrew):
 
 ```bash
-./scripts/build_app.sh   # → dist/PID Anonymouse.app
+./scripts/build_app.sh   # → dist/GhostPID.app
 ```
 
 La app de macOS usa `data/` y `configs/` del proyecto, así que se abre desde
 `dist/` (no la muevas a Aplicaciones). Al arrancar pide el PDF y la config
-del cliente, o crea una a partir del ejemplo. `PID_ANONYMOUSE_SELFTEST=1`
+del cliente, o crea una a partir del ejemplo. `GHOSTPID_SELFTEST=1`
 comprueba el paquete sin abrir ventanas (módulos, tesseract y OCR).
 
 ## Estructura

@@ -1,4 +1,4 @@
-PID Anonymouse for Windows
+GhostPID for Windows
 ==========================
 
 Anonymizes P&IDs and PFDs in PDF before using them with LLMs. Everything is
@@ -7,9 +7,9 @@ processed locally: nothing leaves the computer.
 Usage
 -----
 1. Unzip the zip into a folder you can write to (e.g.
-   Documents\PID Anonymouse). Nothing needs installing: OCR (tesseract, with
+   Documents\GhostPID). Nothing needs installing: OCR (tesseract, with
    English and Spanish) is included.
-2. Open "PID Anonymouse.exe". If Windows SmartScreen warns that the app is
+2. Open "GhostPID.exe". If Windows SmartScreen warns that the app is
    not signed, click "More info" and "Run anyway".
 3. The first time, these are created next to the .exe:
    - data\     original PDFs, reports, maps and results (data\out\).
@@ -25,7 +25,7 @@ to hide. Do not share them; share only the PDF in data\out\.
 
 Language: the app is in Spanish if Windows is in Spanish and in English
 otherwise. To force one, set the environment variable
-PID_ANONYMOUSE_LANG=en (or es).
+GHOSTPID_LANG=en (or es).
 
 Full manual: MANUAL.en.md (in this folder). Spanish: MANUAL.md.
-Code and documentation: https://github.com/osbertodiaz/PID_Anonymouse
+Code and documentation: https://github.com/osbertodiaz/GhostPID

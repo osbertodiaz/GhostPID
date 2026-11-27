@@ -13,7 +13,7 @@ hereda el entorno de la terminal. Este lanzador:
   abre la ventana de revisión;
 - muestra en un diálogo los errores que en la terminal irían a stderr.
 
-`PID_ANONYMOUSE_SELFTEST=1` comprueba el paquete sin abrir ventanas.
+`GHOSTPID_SELFTEST=1` comprueba el paquete sin abrir ventanas.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from PyQt6.QtWidgets import (
 
 from sanitizer.i18n import tr
 
-APP_NAME = "PID Anonymouse"
+APP_NAME = "GhostPID"
 SHARED_CONFIGS = ("base.yaml", "example.yaml", "blacklist/industria.csv")
 
 
@@ -322,7 +322,8 @@ def self_test() -> int:
 def main() -> int:
     root = project_root()
     prepare_environment(root)
-    if os.environ.get("PID_ANONYMOUSE_SELFTEST"):
+    # PID_ANONYMOUSE_SELFTEST: nombre anterior, se sigue aceptando.
+    if os.environ.get("GHOSTPID_SELFTEST") or os.environ.get("PID_ANONYMOUSE_SELFTEST"):
         return self_test()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)

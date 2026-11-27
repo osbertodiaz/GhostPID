@@ -1,6 +1,6 @@
-# PID Anonymouse user manual
+# GhostPID user manual
 
-PID Anonymouse removes whatever identifies the client from P&IDs and PFDs in
+GhostPID removes whatever identifies the client from P&IDs and PFDs in
 PDF before you give them to an LLM. It removes companies, operator,
 manufacturers, location, project codes, references to other documents,
 authors, logos, title blocks and metadata. It keeps everything technical:
@@ -17,8 +17,8 @@ interlocks and notes.
 
 > **Language.** The app and the command-line tools follow the operating
 > system language: Spanish if it is Spanish (any `es_*`), English otherwise.
-> To force one, set the environment variable `PID_ANONYMOUSE_LANG=en` or
-> `PID_ANONYMOUSE_LANG=es`. The Spanish manual is [MANUAL.md](MANUAL.md).
+> To force one, set the environment variable `GHOSTPID_LANG=en` or
+> `GHOSTPID_LANG=es`. The Spanish manual is [MANUAL.md](MANUAL.md).
 
 ---
 
@@ -26,11 +26,11 @@ interlocks and notes.
 
 ### Windows (download)
 
-1. Download `PID-Anonymouse-windows-x64.zip` from the
-   [Releases](https://github.com/osbertodiaz/PID_Anonymouse/releases) page.
+1. Download `GhostPID-windows-x64.zip` from the
+   [Releases](https://github.com/osbertodiaz/GhostPID/releases) page.
 2. Unzip it into a folder you can write to, for example
-   `Documents\PID Anonymouse`. Do not run it from inside the zip.
-3. Open `PID Anonymouse.exe`. The app is not signed, so Windows SmartScreen
+   `Documents\GhostPID`. Do not run it from inside the zip.
+3. Open `GhostPID.exe`. The app is not signed, so Windows SmartScreen
    may warn you: click **More info** and then **Run anyway**.
 
 Nothing else needs installing: OCR (Tesseract, with English and Spanish) is
@@ -42,13 +42,13 @@ You need [uv](https://docs.astral.sh/uv/) and Tesseract:
 
 ```bash
 brew install uv tesseract tesseract-lang
-git clone https://github.com/osbertodiaz/PID_Anonymouse.git
-cd PID_Anonymouse
+git clone https://github.com/osbertodiaz/GhostPID.git
+cd GhostPID
 uv sync
 ./scripts/build_app.sh
 ```
 
-The app ends up in `dist/PID Anonymouse.app`. Open it from there: it works
+The app ends up in `dist/GhostPID.app`. Open it from there: it works
 with the project's `data/` and `configs/` folders, so do not move it to
 Applications.
 
@@ -366,7 +366,7 @@ locations. `revert` is only available from the command line.
 | "Change rejected" when adding something | The change would make the config invalid (e.g. a term that is also an exception). Read the message; the config was not touched |
 | The process is slow | It is normal with many scanned pages: OCR is repeated so nothing is left behind. While tuning rules, use **Recalculate** (no OCR) |
 | I want to undo the last config change | Copy `configs/<client>.yaml.bak` over `configs/<client>.yaml` |
-| The app is in the wrong language | Set `PID_ANONYMOUSE_LANG=en` (or `es`) before opening it |
+| The app is in the wrong language | Set `GHOSTPID_LANG=en` (or `es`) before opening it |
 
 ---
 
