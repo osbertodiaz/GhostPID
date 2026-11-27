@@ -227,11 +227,37 @@ código 1 si encuentra restos:
   en qué páginas. Como contiene valores originales, **solo se guarda en
   `data/`**.
 
-## Uso (previsto, fase 8)
+## Uso: CLI completa (fase 8)
 
 ```bash
-uv run sanitize data/plano.pdf --config configs/<cliente>.yaml
+uv run sanitize data/proyecto/ --config configs/<cliente>.yaml [--map data/maps/<proyecto>.map.json]
 ```
+
+Por cada PDF (se admiten ficheros y carpetas, que se recorren recursivamente):
+
+1. `anonymize`: zonas, logos, texto y OCR, con mapa de sustitución.
+2. `clean-metadata`.
+3. `audit`.
+4. **Autocorrección** (`--repair N`, 1 por defecto; 0 la desactiva): los
+   restos que la auditoría encuentra **por OCR** se corrigen y se reaudita,
+   con OCR solo en las páginas corregidas. No se tocan restos en la capa de
+   texto ni lo que hay sobre texto real: eso indica una regla incompleta y
+   se informa.
+
+Salidas:
+
+- `data/out/<doc>.sanitized.pdf`: el PDF que se puede compartir.
+- `data/reports/<doc>/`: `anonimizado.json`, `metadatos.json`,
+  `auditoria.md` y `auditoria.json`, y los PNG de revisión.
+- `data/maps/<doc>.map.json`, o el mapa común de `--map`.
+
+Al final se imprime una tabla resumen. El código de salida es 1 si algún
+documento no pasa la auditoría. Una config con errores (`validate-config`) se
+rechaza antes de empezar.
+
+**Ciclo recomendado con un cliente nuevo**: `inventory` → preparar la config
+→ `sanitize` → leer el "texto restante para revisar" de cada `auditoria.md` →
+añadir a las reglas lo que sea un nombre → repetir.
 
 ## Estructura
 

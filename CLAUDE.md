@@ -15,7 +15,7 @@ Python 3.12, uv, PyMuPDF, pikepdf, pdfplumber, OpenCV, pytesseract, pyyaml, pyte
 
 ## Comandos
 - Tests: `uv run pytest`
-- CLI: `uv run sanitize <pdf> --config configs/<cliente>.yaml`
+- CLI completa: `uv run sanitize <pdf|carpeta>... --config configs/<cliente>.yaml [--map data/maps/<proyecto>.map.json] [--repair N]`
 - Diagnóstico: `uv run inventory data/ --out data/reports [--config configs/<cliente>.yaml]`
 - Reglas: `uv run validate-config configs/<cliente>.yaml --check "texto"`
 - Metadatos: `uv run clean-metadata <pdf> -o <salida> [--config …]`
