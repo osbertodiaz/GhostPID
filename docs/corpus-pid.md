@@ -191,3 +191,32 @@ Ciclo completo sobre los 6 sets: `anonymize` → `clean-metadata` → `audit`
 **Pendiente para la fase 8**: usar los hallazgos de la auditoría para
 corregir automáticamente (redactar las áreas de los restos que tienen
 coordenadas y volver a auditar) en lugar de solo informar.
+
+## CLI completa y autocorrección: resultados (fase 8)
+
+`sanitize` sobre los 6 sets (anonimizar → metadatos → auditoría →
+autocorrección de una pasada): unos 72 minutos, 5 de 6 sin restos a la
+primera.
+
+- **Tamaño y caída con escaneados**: la primera pasada completa terminó en
+  segfault con el set escaneado de 68 páginas. MuPDF guarda sin comprimir las
+  imágenes JPEG redactadas por píxeles. El anonimizado salía unas 10 veces
+  mayor que el original (más de 200 MB) y las copias en memoria para el OCR
+  ocupaban varios GB. Ahora las imágenes que eran JPEG en el original se
+  recodifican como JPEG (calidad 90, `redaction.jpeg_quality`), y toda copia
+  en memoria se guarda comprimida. Ese set pasó de 223 MB a 49 MB y ya no cae.
+- **Autocorrección**: en el set escaneado más grande corrigió restos de OCR
+  en 10 páginas. Uno de los restos volvió a aparecer en la reauditoría: el
+  OCR de letra muy pequeña (unos 4 pt) no lee igual dos veces. `--repair 2`
+  da una segunda pasada.
+- **Lecturas giradas**: en páginas rotadas, el OCR leyó del revés una
+  denominación genérica ya insertada ("DOC-REF-108" como un número de teléfono) y la
+  marcó como teléfono. La autocorrección no la tocó porque debajo hay texto
+  real. La auditoría marca ahora como aviso, no como error, los hallazgos de
+  OCR cuya área ocupa texto real en otra dirección, y solo esos. Si el texto
+  real va en la misma dirección que la línea del OCR, sigue siendo error:
+  podría ser una fuga bajo la sustitución.
+- **Sufijos en referencias**: una referencia documental con sufijo de letra
+  (`XXX-D-014-A`) no encajaba en un patrón que solo admitía sufijo numérico.
+  Era un hueco de la config local, no de la herramienta. La auditoría lo
+  encontró en la capa de texto y no lo corrigió a ciegas, como se esperaba.
