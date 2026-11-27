@@ -131,6 +131,7 @@ def test_encrypted_pdf_reports_error(plain_pdf, tmp_path):
 @pytest.mark.parametrize(
     ("words", "coverage", "drawings", "glyphs", "expected"),
     [
+        (200, 0.0, 800, 0, "text"),
         (10, 0.0, 5, 0, "text"),
         (10, 0.0, 500, 49, "text"),
         (10, 0.0, 500, 50, "text_and_stroke_text"),
@@ -171,3 +172,105 @@ def test_cli_writes_reports(rich_pdf, tmp_path, capsys):
 def test_cli_warns_outside_data(plain_pdf, tmp_path, capsys):
     assert main([str(plain_pdf), "--out", str(tmp_path / "elsewhere")]) == 0
     assert "AVISO" in capsys.readouterr().err
+
+
+def test_invisible_ocr_text_is_counted(tmp_path):
+    """Escaneado con capa OCR invisible (modo de render 3)."""
+    base = tmp_path / "scan.pdf"
+    _build_base(base)
+    doc = pymupdf.open(base)
+    doc[1].insert_text((100, 100), "ACME PLANT OCR", render_mode=3)
+    out = tmp_path / "scan_ocr.pdf"
+    doc.save(out)
+    doc.close()
+
+    r = inspect_pdf(out)
+    page = r["pages"][1]
+    assert page["invisible_chars"] == len("ACME PLANT OCR")
+    assert page["kind"] == "image_with_text"
+    assert r["pages"][0]["invisible_chars"] == 0
+    assert r["pages"][0]["visible_chars"] > 0
+    assert r["summary"]["invisible_text_pages"] == 1
+
+
+def test_outline_titles_listed(tmp_path, synthetic_pdf):
+    doc = pymupdf.open(synthetic_pdf)
+    doc.set_toc([[1, "ACME confidential set", 1], [2, "Rev 05 internal", 1]])
+    out = tmp_path / "toc.pdf"
+    doc.save(out)
+    doc.close()
+
+    r = inspect_pdf(out)
+    assert [o["title"] for o in r["outline"]] == ["ACME confidential set", "Rev 05 internal"]
+    assert "ACME confidential set" in format_markdown(r)
+
+
+def test_repeated_image_flagged_as_logo_candidate(tmp_path):
+    path = tmp_path / "logo.pdf"
+    logo = ImageReader(Image.new("RGB", (40, 20), color=(200, 0, 0)))
+    c = canvas.Canvas(str(path), pagesize=PAGE)
+    for _ in range(4):
+        c.drawImage(logo, 1000, 50, width=80, height=40)
+        c.drawString(100, 700, "P-101")
+        c.showPage()
+    c.save()
+
+    r = inspect_pdf(path)
+    assert len(r["images"]) == 1
+    assert r["images"][0]["pages"] == [1, 2, 3, 4]
+    assert len(r["images"][0]["xrefs"]) == 1
+    assert r["images"][0]["repeated"] is True
+    assert r["summary"]["repeated_images"] == 1
+
+
+def test_same_logo_with_different_xrefs_grouped(tmp_path):
+    """Cada página guarda su propia copia del logo: mismo hash, distinto xref."""
+    path = tmp_path / "logos.pdf"
+    doc = pymupdf.open()
+    png = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 30, 15), False)
+    png.set_rect(png.irect, (0, 90, 200))
+    data = png.tobytes("png")
+    for _ in range(3):
+        # Documento aparte por página: al unirlos cada uno aporta su propia copia
+        single = pymupdf.open()
+        page = single.new_page()
+        page.insert_image(pymupdf.Rect(10, 10, 70, 40), stream=data)
+        page.insert_text((100, 100), "P-101")
+        doc.insert_pdf(single)
+        single.close()
+    doc.save(path)
+    doc.close()
+
+    r = inspect_pdf(path)
+    assert len(r["images"]) == 1
+    assert len(r["images"][0]["xrefs"]) == 3
+    assert r["images"][0]["repeated"] is True
+
+
+def test_invisible_text_over_vectors(tmp_path):
+    """Como AutoCAD con SHX: trazos visibles y texto invisible encima."""
+    path = tmp_path / "shx.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for i in range(30):
+        page.draw_line((50 + i * 10, 400), (55 + i * 10, 410))
+    page.insert_text((50, 300), "FIC-1203 PUMP P-101A ACME PLANT", render_mode=3)
+    doc.save(path)
+    doc.close()
+
+    r = inspect_pdf(path)
+    assert r["pages"][0]["kind"] == "invisible_text_over_vectors"
+    assert r["summary"]["invisible_text_over_vectors"] is True
+    assert r["summary"]["needs_ocr"] is False  # el texto ya está en la capa de texto
+
+
+@pytest.mark.parametrize(
+    ("visible", "invisible", "expected"),
+    [
+        (5000, 40, "text"),  # unas pocas marcas invisibles ("XXX" de una valla)
+        (0, 3000, "invisible_text_over_vectors"),
+        (0, 10, "text"),
+    ],
+)
+def test_classify_invisible_text(visible, invisible, expected):
+    assert classify_page(100, 0.0, 800, 0, visible, invisible) == expected

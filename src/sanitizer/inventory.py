@@ -14,6 +14,7 @@ contenido de anotaciones). Guárdalo solo dentro de data/.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -34,6 +35,19 @@ IMAGE_COVERAGE_THRESHOLD = 0.5
 # logos y cajetines dan < 40; un P&ID con tags en SHX, > 90.
 STROKE_TEXT_MIN_GLYPHS = 50
 
+# Caracteres invisibles mínimos para considerar que una página vectorial lleva
+# una capa de texto invisible sobre trazos (AutoCAD exporta así el texto SHX)
+INVISIBLE_TEXT_MIN_CHARS = 20
+
+# Páginas mínimas en las que aparece una misma imagen para marcarla como
+# repetida (logos, sellos, cajetines rasterizados). Es un número absoluto y no
+# una fracción: en un set mixto el logo puede estar solo en las páginas
+# vectoriales y no en las escaneadas.
+REPEATED_IMAGE_MIN_PAGES = 3
+
+# Marcadores que se listan en el informe (los títulos pueden ser sensibles)
+MAX_OUTLINE_LISTED = 40
+
 # Longitud máxima de los textos citados en el informe (contenido de anotaciones)
 PREVIEW_CHARS = 80
 
@@ -46,6 +60,9 @@ PAGE_KIND_LABELS = {
     "stroke_text_only": "solo texto en trazos, sin capa de texto (necesita OCR)",
     "image_only": "solo imagen (escaneado o raster, necesita OCR)",
     "image_with_text": "imagen con capa de texto (posible OCR previo)",
+    "invisible_text_over_vectors": (
+        "texto invisible sobre trazos (AutoCAD/SHX): se extrae, pero lo visible son trazos"
+    ),
     "vector_only": "solo trazos, sin texto detectado",
     "empty": "vacía",
 }
@@ -72,12 +89,18 @@ def inspect_pdf(path: str | Path) -> dict[str, Any]:
             return report
 
         report["page_count"] = doc.page_count
-        report["outline_entries"] = len(doc.get_toc())
+        toc = doc.get_toc()
+        report["outline_entries"] = len(toc)
+        report["outline"] = [
+            {"level": lvl, "title": title, "page": page}
+            for lvl, title, page in toc[:MAX_OUTLINE_LISTED]
+        ]
         report["embedded_files"] = _embedded_files(doc)
         report["layers"] = _layers(doc)
         report["javascript"] = _javascript(doc)
         report["pages"] = [_page_info(page) for page in doc]
         report["fonts"] = _fonts(doc)
+        report["images"] = _images(doc)
 
     report.update(_pikepdf_info(path))
     report["summary"] = _summary(report)
@@ -164,6 +187,7 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
     page_area = rect.width * rect.height or 1.0
 
     words = page.get_text("words")
+    visible_chars, invisible_chars = _text_visibility(page)
     images = page.get_image_info()
     covered = 0.0
     for img in images:
@@ -174,7 +198,7 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
 
     cdrawings = page.get_cdrawings()
     drawings = len(cdrawings)
-    stroke_runs = find_stroke_text(cdrawings)
+    stroke_runs = find_stroke_text(cdrawings, page.rect)
     stroke_glyphs = sum(r.glyphs for r in stroke_runs)
 
     annots = []
@@ -194,6 +218,8 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
         "height_mm": round(rect.height * 25.4 / 72, 1),
         "rotation": page.rotation,
         "words": len(words),
+        "visible_chars": visible_chars,
+        "invisible_chars": invisible_chars,
         "images": len(images),
         "image_coverage": round(coverage, 3),
         "drawings": drawings,
@@ -201,18 +227,75 @@ def _page_info(page: pymupdf.Page) -> dict[str, Any]:
         "stroke_text_glyphs": stroke_glyphs,
         "links": len(page.get_links()),
         "annotations": annots,
-        "kind": classify_page(len(words), coverage, drawings, stroke_glyphs),
+        "kind": classify_page(
+            len(words), coverage, drawings, stroke_glyphs, visible_chars, invisible_chars
+        ),
     }
 
 
+def _text_visibility(page: pymupdf.Page) -> tuple[int, int]:
+    """Caracteres visibles e invisibles (modo de render 3 u opacidad 0).
+
+    El texto invisible es típico de la capa OCR de un escaneado: no se ve,
+    pero se extrae y se envía a un LLM igual que el visible.
+    """
+    visible = invisible = 0
+    for span in page.get_texttrace():
+        n = len(span.get("chars", ()))
+        if span.get("type") == 3 or span.get("opacity", 1) == 0:
+            invisible += n
+        else:
+            visible += n
+    return visible, invisible
+
+
+def _images(doc: pymupdf.Document) -> list[dict[str, Any]]:
+    """Imágenes del documento por xref, con las páginas donde aparecen.
+
+    Una imagen que se repite en muchas páginas suele ser un logo, un sello o
+    un cajetín rasterizado: candidata a eliminarse por hash en la fase 5.
+    """
+    # Se agrupa por hash del contenido: muchos PDF guardan una copia del logo
+    # por página, con xref distinto pero los mismos bytes
+    digests: dict[int, str] = {}
+    images: dict[str, dict[str, Any]] = {}
+    for page in doc:
+        for img in page.get_images(full=True):
+            xref, width, height = img[0], img[2], img[3]
+            if xref not in digests:
+                raw = doc.xref_stream_raw(xref) or b""
+                digests[xref] = hashlib.sha256(raw).hexdigest()[:16]
+            entry = images.setdefault(
+                digests[xref],
+                {"hash": digests[xref], "xrefs": [], "width": width, "height": height, "pages": []},
+            )
+            if xref not in entry["xrefs"]:
+                entry["xrefs"].append(xref)
+            if page.number + 1 not in entry["pages"]:
+                entry["pages"].append(page.number + 1)
+    threshold = min(REPEATED_IMAGE_MIN_PAGES, max(doc.page_count, 2))
+    for entry in images.values():
+        entry["repeated"] = len(entry["pages"]) >= threshold
+    return sorted(images.values(), key=lambda e: (-len(e["pages"]), e["xrefs"][0]))
+
+
 def classify_page(
-    words: int, image_coverage: float, drawings: int, stroke_glyphs: int = 0
+    words: int,
+    image_coverage: float,
+    drawings: int,
+    stroke_glyphs: int = 0,
+    visible_chars: int = 0,
+    invisible_chars: int = 0,
 ) -> str:
     """Clasifica una página según su contenido (ver PAGE_KIND_LABELS)."""
     is_image = image_coverage >= IMAGE_COVERAGE_THRESHOLD
     has_stroke_text = stroke_glyphs >= STROKE_TEXT_MIN_GLYPHS
     if is_image:
         return "image_with_text" if words else "image_only"
+    if invisible_chars >= INVISIBLE_TEXT_MIN_CHARS and invisible_chars > visible_chars:
+        # El texto se puede extraer, pero redactarlo no borra lo que se ve:
+        # hay que eliminar también los trazos que hay debajo
+        return "invisible_text_over_vectors"
     if words:
         return "text_and_stroke_text" if has_stroke_text else "text"
     if has_stroke_text:
@@ -262,6 +345,12 @@ def _summary(report: dict[str, Any]) -> dict[str, Any]:
         "layers": len(report["layers"]),
         "javascript": report["javascript"]["present"],
         "fonts": len(report["fonts"]),
+        "images": len(report["images"]),
+        "invisible_text_over_vectors": any(
+            p["kind"] == "invisible_text_over_vectors" for p in report["pages"]
+        ),
+        "repeated_images": sum(1 for i in report["images"] if i["repeated"]),
+        "invisible_text_pages": sum(1 for p in report["pages"] if p["invisible_chars"]),
         "needs_ocr": any(p["kind"] in OCR_KINDS for p in report["pages"]),
     }
 
@@ -292,7 +381,9 @@ def format_markdown(report: dict[str, Any]) -> str:
         f"- Adjuntos: {s['embedded_files']} · anotaciones: {s['annotations']}"
         f" · enlaces: {s['links']} · capas (OCG): {s['layers']}"
         f" · JavaScript: {yes(s['javascript'])}",
-        f"- Fuentes: {s['fonts']}",
+        f"- Fuentes: {s['fonts']} · imágenes: {s['images']}"
+        f" (repetidas en muchas páginas: {s['repeated_images']})",
+        f"- Páginas con texto invisible (capa OCR): {s['invisible_text_pages']}",
         f"- Requiere OCR en alguna página: {yes(s['needs_ocr'])}",
         "",
         "## Metadatos Info",
@@ -318,6 +409,13 @@ def format_markdown(report: dict[str, Any]) -> str:
         for l in report["layers"]
     ] or ["- (ninguna)"]
 
+    lines += ["", "## Marcadores", ""]
+    lines += [
+        f"- {'  ' * (o['level'] - 1)}{o['title']} → pág {o['page']}" for o in report["outline"]
+    ] or ["- (ninguno)"]
+    if report["outline_entries"] > len(report["outline"]):
+        lines.append(f"- … y {report['outline_entries'] - len(report['outline'])} más")
+
     js = report["javascript"]
     lines += ["", "## JavaScript", ""]
     if js["present"] or js["open_action"] or js["catalog_additional_actions"]:
@@ -334,14 +432,15 @@ def format_markdown(report: dict[str, Any]) -> str:
         "",
         "## Páginas",
         "",
-        "| Pág | Tamaño (mm) | Rot | Palabras | Imágenes | Cobertura img | Trazos "
-        "| Glifos en trazos | Anot. | Tipo |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Pág | Tamaño (mm) | Rot | Palabras | Car. invisibles | Imágenes | Cobertura img "
+        "| Trazos | Glifos en trazos | Anot. | Tipo |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for p in report["pages"]:
         lines.append(
             f"| {p['number']} | {p['width_mm']}×{p['height_mm']} | {p['rotation']} "
-            f"| {p['words']} | {p['images']} | {p['image_coverage']:.0%} | {p['drawings']} "
+            f"| {p['words']} | {p['invisible_chars']} | {p['images']} | {p['image_coverage']:.0%} "
+            f"| {p['drawings']} "
             f"| {p['stroke_text_glyphs']} | {len(p['annotations'])} | {PAGE_KIND_LABELS[p['kind']]} |"
         )
 
@@ -352,6 +451,20 @@ def format_markdown(report: dict[str, Any]) -> str:
             for a in p["annotations"]:
                 detail = " · ".join(x for x in (a["author"], a["content"]) if x)
                 lines.append(f"- Pág {p['number']}: {a['type']}" + (f" · {detail}" if detail else ""))
+
+    lines += [
+        "",
+        "## Imágenes",
+        "",
+        "| Hash | xrefs | Tamaño (px) | Páginas | Repetida |",
+        "|---|---|---|---|---|",
+    ]
+    lines += [
+        f"| `{i['hash']}` | {_page_ranges(i['xrefs'])} | {i['width']}×{i['height']} "
+        f"| {_page_ranges(i['pages'])} "
+        f"| {'sí (¿logo/sello?)' if i['repeated'] else 'no'} |"
+        for i in report["images"]
+    ] or ["| (ninguna) | | | | |"]
 
     lines += [
         "",
