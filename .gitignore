@@ -22,3 +22,9 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Configs de cliente: contienen los nombres que se anonimizan. Solo se
+# versionan la base y el ejemplo ficticio.
+configs/*
+!configs/base.yaml
+!configs/example.yaml

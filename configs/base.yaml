@@ -1,0 +1,73 @@
+# Config base: patrones genéricos de P&ID que se conservan siempre.
+#
+# Las configs de cliente heredan de esta con `extends: base.yaml` y añaden sus
+# sustituciones y zonas. Para ajustar una regla de aquí sin copiarla, repite
+# su `id` en la config del cliente con las claves que cambian (p. ej.
+# `exceptions`). Para quitarla: `disable: [id]`.
+#
+# Todas las reglas usan `boundary: token` (por defecto): el patrón solo encaja
+# si no va pegado a letras, dígitos, "-", "_" o "/". Así "PID-001" no se
+# protege cuando forma parte de una referencia como "ACM-2041-PID-001".
+
+version: 1
+name: Base P&ID genérica
+
+whitelist:
+  - id: instrument_tag
+    description: Tags de instrumentos ISA 5.1 (letras de función + número de lazo)
+    pattern: '[A-Z]{2,5}-?\d{2,6}[A-Z]{0,2}'
+    examples: [FIC-1203, PT-02305A, TT01455A, LSHH-4101, XV-050123, FE-030212]
+    counter_examples: [fic-1203, ACM-2041-PID-001]
+
+  - id: equipment_tag
+    description: Tags de equipos (bombas, tanques, recipientes, cambiadores)
+    pattern: '[A-Z]{1,4}-\d{2,6}[A-Z]{0,2}(?:/[A-Z])?'
+    examples: [P-101A, TK-4001, V-4002, P-006A/B, MB-01, E-1201]
+
+  - id: valve_tag
+    description: Tags con dígito en el prefijo (válvulas y equipos por serie)
+    pattern: '[A-Z]{1,3}\d{1,2}-\d{2,5}[A-Z]{0,2}'
+    examples: [V4-650, VB8-62L, HV2-101]
+
+  - id: area_equipment_tag
+    description: Tags de equipo con prefijo de área (100-P-101A)
+    pattern: '\d{2,4}-[A-Z]{1,4}-\d{2,5}[A-Z]{0,2}'
+    examples: [100-P-101A, 02-V-001]
+
+  - id: line_number
+    description: >-
+      Números de línea (tamaño, servicio, número, especificación). En formato
+      métrico el tamaño va de 1 a 4 dígitos: las referencias documentales que
+      empiezan con un código de 5 cifras (12345-ABC-PRO-PID-001) no encajan.
+    pattern: '\d+(?:[./]\d+)?"-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,8}){0,5}|\d{1,4}-[A-Z]{1,4}(?:-[A-Z0-9]{1,8}){2,5}'
+    examples: ['6"-PL-1001-A1A', '8"-P-ABC-01234-A21F-H', '3"-WAS', '150-PG-1001-B1']
+    counter_examples: [12345-ABC-PRO-PID-001]
+
+  - id: pipe_size
+    description: Tamaños de tubería y reducciones
+    pattern: '\d+(?:[./]\d+)?"\s?[xX]\s?\d+(?:[./]\d+)?"|\d+-\d+/\d+"|\d+(?:[./]\d+)?(?:"|\s?(?:in|mm|NPS))|(?:DN|NPS)\s?\d+(?:[./]\d+)?'
+    examples: ['3/4"', '6"', '8"x6"', '1-1/2"', DN50, NPS 2, 2 in, 150 mm]
+
+  - id: design_value
+    description: Valores con unidad (presión, temperatura, caudal, potencia…)
+    pattern: '-?\d+(?:[.,]\d+)?\s?(?:barg|bara|bar|mbar|psig|psia|psi|kPag|kPa|MPa|°C|ºC|°F|ºF|''C|degC|degF|kg/hr?|t/h|[NS]m3/hr?|m3/hr?|gpm|GPM|l/s|kW|MW|HP|hp|rpm|RPM|Hz|kV|V|%|ppm)'
+    examples: [15 barg, 120 °C, 260.3 Nm3/hr, '-10''C', 3.5 MPa, 75 kW, 100%, 1450 rpm]
+
+  - id: alarm_and_logic
+    description: Niveles de alarma, lógica de seguridad y posición de fallo
+    pattern: 'HHH|HH|LLL|LL|ESD|SIS|SIF|BPCS|PSD|EDP|INTERLOCK|PERMISSIVE|TRIP|FC|FO|FL|LO|LC|CSO|CSC'
+    examples: [HH, LL, ESD, SIF, INTERLOCK, FC, CSO]
+
+  - id: interlock_id
+    description: Identificadores de interlocks y funciones de seguridad
+    pattern: '(?:I|IL|SIF|ESD|IS)-\d{1,5}[A-Z]?'
+    examples: [I-101, SIF-2001, ESD-01]
+
+  - id: note_ref
+    description: Llamadas a notas del plano
+    pattern: '(?:NOTE|NOTA)[\s-]?\d{1,3}'
+    examples: [NOTE 2, NOTA 12, NOTE13, NOTE-3]
+
+substitutions: []
+
+zones: []

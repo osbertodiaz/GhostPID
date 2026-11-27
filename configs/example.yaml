@@ -1,0 +1,87 @@
+# Config de ejemplo con nombres FICTICIOS. Sirve de plantilla para un cliente:
+#
+#   cp configs/example.yaml configs/<cliente>.yaml
+#   uv run validate-config configs/<cliente>.yaml --check "texto de prueba"
+#
+# Las configs reales contienen los nombres que se quieren ocultar, así que
+# git las ignora (solo se versionan base.yaml y example.yaml).
+
+version: 1
+name: Cliente de ejemplo (ficticio)
+extends: base.yaml
+
+whitelist:
+  # Ajuste de una regla heredada: solo se escriben las claves que cambian.
+  # El código de proyecto "PRJ-4711" tiene forma de tag de instrumento, pero
+  # no lo es: sin esta excepción quedaría protegido y nunca se sustituiría.
+  - id: instrument_tag
+    exceptions: ['PRJ-\d{4}']
+  - id: equipment_tag
+    exceptions: ['PRJ-\d{4}']
+
+substitutions:
+  - id: epc
+    category: company
+    description: Empresa de ingeniería
+    replacement: EPC
+    terms: [ACME Engineering, ACME Eng., ACME]
+
+  - id: operator
+    category: operator
+    description: Propietario y operador de la planta
+    replacement: OPR
+    terms: [Globex Petroleum, Globex]
+
+  - id: vendors
+    category: manufacturer
+    description: Fabricantes visibles en el plano
+    replacement: VENDOR-{n}
+    terms: [Initech Pumps, Umbrella Valves]
+
+  - id: project_code
+    category: project
+    replacement: PRJ-{n}
+    patterns: ['PRJ-\d{4}']
+    examples: [PRJ-4711]
+
+  - id: document_refs
+    category: document_ref
+    description: Números de plano y documentos de referencia
+    replacement: DOC-REF-{n}
+    patterns: ['ACM-\d{4}-[A-Z]{3}-\d{3}']
+    examples: [ACM-2041-PID-001]
+
+  - id: people
+    category: person
+    description: Dibujantes, revisores y usuarios CAD
+    replacement: ''
+    terms: [John Doe, J. Doe, jdoe]
+
+  - id: site
+    category: location
+    replacement: SITE
+    terms: [Springfield Refinery, Springfield]
+
+zones:
+  - id: title_block
+    description: Cajetín (abajo a la derecha), en fracción de página
+    rect: [0.0, 0.0, 0.22, 0.30]
+    anchor: bottom-right
+
+  - id: side_strip
+    description: Margen izquierdo con ruta de fichero y usuario CAD, en mm
+    rect: [0, 0, 15, 300]
+    unit: mm
+    anchor: bottom-left
+    orientation: landscape
+
+  - id: cover_logo
+    description: Logo de la portada
+    rect: [0.70, 0.02, 0.98, 0.12]
+    pages: [1]
+
+# Umbrales de los detectores. Solo hace falta si un set se sale de lo calibrado.
+detection:
+  stroke_text_min_glyphs: 50
+  stroke_text:
+    min_glyph_height: 3.0
