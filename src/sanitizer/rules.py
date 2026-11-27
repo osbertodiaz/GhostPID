@@ -14,6 +14,8 @@ Una config tiene cuatro bloques:
 - `metadata`: qué hacer con anotaciones, enlaces, capas y marcadores.
 - `redaction`: cómo se redacta el texto (relleno, qué se borra bajo cada
   redacción según el tipo de página, capas ocultas, anotaciones).
+- `logos`: imágenes repetidas que se eliminan, y hashes fijados a mano.
+- `ocr`: OCR del texto en trazos y de los escaneados.
 
 Las configs pueden heredar de otra con `extends` (ruta relativa al fichero).
 Al heredar:
@@ -21,7 +23,7 @@ Al heredar:
 - Las reglas y zonas se combinan por `id`: si el hijo repite un `id`, sus
   claves sobrescriben las del padre (p. ej. añadir `exceptions` a una regla
   base sin repetir su patrón); si no, se añaden.
-- `detection`, `metadata` y `redaction` se combinan clave a clave.
+- `detection`, `metadata`, `redaction`, `logos` y `ocr` se combinan clave a clave.
 - `disable: [id, …]` quita reglas o zonas heredadas.
 
 Cada regla lleva ejemplos. Sirven para validar las regex y para detectar
@@ -49,6 +51,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from sanitizer.inventory import DetectionParams
 from sanitizer.metadata import MetadataPolicy
+from sanitizer.logos import LogoPolicy
+from sanitizer.ocr import OcrPolicy
 from sanitizer.redact import RedactionPolicy
 
 SCHEMA_VERSION = 1
@@ -283,6 +287,8 @@ class Zone(_Strict):
     # "all" o lista de páginas (1 = primera, -1 = última) y rangos "3-7"
     pages: Literal["all"] | list[int | str] = "all"
     orientation: Literal["any", "landscape", "portrait"] = "any"
+    # Texto opcional que se escribe en la zona vaciada (p. ej. "[CAJETÍN]")
+    label: str = ""
 
     @model_validator(mode="after")
     def _validate(self) -> Zone:
@@ -359,6 +365,8 @@ class Config(_Strict):
     detection: DetectionParams = Field(default_factory=DetectionParams)
     metadata: MetadataPolicy = Field(default_factory=MetadataPolicy)
     redaction: RedactionPolicy = Field(default_factory=RedactionPolicy)
+    logos: LogoPolicy = Field(default_factory=LogoPolicy)
+    ocr: OcrPolicy = Field(default_factory=OcrPolicy)
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Config:
@@ -430,7 +438,7 @@ def _merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
     for key, value in child.items():
         if key in _RULE_BLOCKS and isinstance(value, list) and isinstance(out.get(key), list):
             out[key] = _merge_rules(out[key], value)
-        elif key in ("detection", "metadata", "redaction") and isinstance(value, dict) and isinstance(out.get(key), dict):
+        elif key in ("detection", "metadata", "redaction", "logos", "ocr") and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], value)
         else:
             out[key] = value
