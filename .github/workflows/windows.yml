@@ -1,0 +1,70 @@
+# Versión descargable para Windows: app de revisión con tesseract incluido.
+# - Manual (workflow_dispatch): deja el zip como artefacto del run.
+# - Al subir un tag v*: además crea la release con el zip.
+name: Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Tesseract
+        run: |
+          choco install tesseract -y --no-progress
+          Invoke-WebRequest https://github.com/tesseract-ocr/tessdata/raw/main/spa.traineddata -OutFile "C:\Program Files\Tesseract-OCR\tessdata\spa.traineddata"
+          "C:\Program Files\Tesseract-OCR" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest -q
+
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Tesseract
+        run: |
+          choco install tesseract -y --no-progress
+          Invoke-WebRequest https://github.com/tesseract-ocr/tessdata/raw/main/spa.traineddata -OutFile "C:\Program Files\Tesseract-OCR\tessdata\spa.traineddata"
+      - name: Construir la app
+        run: uv run python scripts/build_app.py --tesseract "C:\Program Files\Tesseract-OCR"
+      - name: Autodiagnóstico de la app
+        shell: pwsh
+        run: |
+          $app = "dist\PID Anonymouse"
+          $env:PID_ANONYMOUSE_SELFTEST = "1"
+          $p = Start-Process -FilePath "$app\PID Anonymouse.exe" -Wait -PassThru
+          Get-Content "$app\selftest.log"
+          if ($p.ExitCode -ne 0) { throw "autodiagnóstico fallido ($($p.ExitCode))" }
+          Remove-Item "$app\selftest.log", "$app\data", "$app\configs" -Recurse -Force
+      - name: Empaquetar
+        shell: pwsh
+        run: |
+          Copy-Item scripts\LEEME-windows.txt "dist\PID Anonymouse\LEEME.txt"
+          $name = "PID-Anonymouse-windows-x64.zip"
+          Compress-Archive -Path "dist\PID Anonymouse" -DestinationPath $name
+          "ZIP=$name" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PID-Anonymouse-windows-x64
+          path: ${{ env.ZIP }}
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP }}
+          generate_release_notes: true

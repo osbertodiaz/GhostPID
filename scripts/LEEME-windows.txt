@@ -1,0 +1,26 @@
+PID Anonymouse para Windows
+===========================
+
+Anonimiza P&ID y PFD en PDF antes de usarlos con LLMs. Todo se procesa en
+local: nada sale del equipo.
+
+Uso
+---
+1. Descomprime el zip en una carpeta donde puedas escribir (p. ej.
+   Documentos\PID Anonymouse). No hace falta instalar nada: el OCR
+   (tesseract, con inglés y español) va incluido.
+2. Abre "PID Anonymouse.exe". Si Windows SmartScreen avisa de que la app no
+   está firmada, pulsa "Más información" y "Ejecutar de todas formas".
+3. La primera vez se crean junto al .exe:
+   - data\     PDF originales, informes, mapas y resultados (data\out\).
+   - configs\  reglas: base.yaml y example.yaml (no se editan).
+4. En el diálogo inicial elige el PDF y la config de tu cliente, o crea una
+   con "Nueva…" (parte del ejemplo, con nombres ficticios).
+5. Revisa las detecciones, descarta falsos positivos, añade términos y
+   zonas, y pulsa "Confirmar y generar". El PDF anonimizado queda en
+   data\out\<documento>.sanitized.pdf y la auditoría en data\reports\.
+
+Importante: data\ y configs\<cliente>.yaml contienen los nombres reales que
+se quieren ocultar. No los compartas; comparte solo el PDF de data\out\.
+
+Código y documentación: https://github.com/osbertodiaz/PID_Anonymouse
