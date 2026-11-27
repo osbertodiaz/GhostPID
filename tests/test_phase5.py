@@ -376,3 +376,29 @@ def test_partial_multiword_term_reported_in_ocr(tmp_path):
     )
     report = anonymize(pdf, tmp_path / "out.pdf", cfg)
     assert any("GLOBEX" in n.text and n.source == "ocr" for n in report.near_misses)
+
+
+def test_scanned_jpeg_stays_jpeg_after_pixel_redaction(tmp_path):
+    """Un escaneado JPEG no debe volver sin pérdidas (10 veces más grande)."""
+    import io
+    import os
+
+    img = Image.new("RGB", (2400, 1700), "white")
+    draw = ImageDraw.Draw(img)
+    draw.text((150, 150), "CLIENT: GLOBEX PETROLEUM", fill="black", font=ImageFont.load_default(size=60))
+    for i in range(0, 2400, 40):  # algo de "dibujo" para que no sea todo blanco
+        draw.line((i, 400, 2400 - i, 1600), fill=(90, 90, 90), width=2)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=80)
+    doc = pymupdf.open()
+    page = doc.new_page(width=A3[0], height=A3[1])
+    page.insert_image(page.rect, stream=buf.getvalue())
+    src = _save(doc, tmp_path / "jpeg.pdf")
+
+    out = tmp_path / "out.pdf"
+    report = anonymize(src, out, _config(tmp_path))
+    assert [r.original for r in report.replacements if r.source == "ocr"] == ["GLOBEX PETROLEUM"]
+    with pymupdf.open(out) as result:
+        xref = result[0].get_images(full=True)[0][0]
+        assert "DCTDecode" in result.xref_get_key(xref, "Filter")[1]
+    assert os.path.getsize(out) < 2.5 * os.path.getsize(src)
