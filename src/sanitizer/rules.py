@@ -514,6 +514,8 @@ def check_overlaps(config: Config) -> list[Issue]:
     - aviso: patrones que encajan con números sueltos (números de lazo).
     - error: el texto de sustitución vuelve a encajar con una sustitución
       (la verificación posterior nunca pasaría).
+    - aviso: una sustitución sin {n} agrupa términos que parecen entidades
+      distintas (la reversión con el mapa no podría distinguirlas).
     """
     issues: list[Issue] = []
 
@@ -578,6 +580,29 @@ def check_overlaps(config: Config) -> list[Issue]:
                             f"con la sustitución '{other.id}'",
                         )
                     )
+
+    from sanitizer.mapping import _same_entity  # mapping importa módulos que importan este
+
+    for sub in config.substitutions:
+        if "{n}" in sub.replacement or not sub.replacement or len(sub.terms) < 2:
+            continue
+        groups: list[list[str]] = []
+        for term in sub.terms:
+            for group in groups:
+                if any(_same_entity(term, other) for other in group):
+                    group.append(term)
+                    break
+            else:
+                groups.append([term])
+        if len(groups) > 1:
+            issues.append(
+                Issue(
+                    "warning",
+                    f"la sustitución '{sub.id}' da '{sub.replacement}' a términos que parecen "
+                    f"entidades distintas ({', '.join(g[0] for g in groups)}): al revertir se "
+                    f"usará uno solo. Si no son sinónimos, usa {{n}} en replacement",
+                )
+            )
 
     seen: dict[str, str] = {}
     for sub in config.substitutions:
